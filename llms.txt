@@ -1,0 +1,4 @@
+# Davilanco Store
+Davilanco is an online marketplace for locally made products, imported finds and curated goods. Customers can browse products, create accounts, place orders and track order status. Seller and administrator tools are access-controlled.
+Public entry point: /
+Product catalogue: /categories.html
