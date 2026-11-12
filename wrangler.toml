@@ -1,0 +1,12 @@
+name = "davilanco-shop"
+pages_build_output_dir = "."
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "davilanco-shop-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[vars]
+SITE_NAME = "Davilanco Store"
