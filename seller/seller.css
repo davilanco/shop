@@ -1,0 +1,1 @@
+.seller-form{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.seller-form textarea{grid-column:1/-1}.seller-form button{justify-self:start}@media(max-width:650px){.seller-form{grid-template-columns:1fr}}
