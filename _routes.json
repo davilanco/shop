@@ -1,0 +1,1 @@
+{"version":1,"include":["/api/*","/admin/*","/seller/*","/dashboard.html"],"exclude":["/css/*","/js/*","/images/*","/*.js","/*.css","/*.svg","/*.png","/*.jpg","/*.webp","/robots.txt","/llms.txt"]}
