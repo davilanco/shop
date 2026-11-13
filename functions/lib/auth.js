@@ -2,7 +2,7 @@ const COOKIE='davilanco_session';
 export const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});
 export async function sha256(v){let b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
 export function randomToken(n=32){let b=crypto.getRandomValues(new Uint8Array(n));return btoa(String.fromCharCode(...b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}
-export async function hashPassword(password,salt){let s=salt||crypto.getRandomValues(new Uint8Array(16)),k=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']),bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:s,iterations:210000,hash:'SHA-256'},k,256);return{salt:btoa(String.fromCharCode(...s)),hash:btoa(String.fromCharCode(...new Uint8Array(bits)))}}
+export async function hashPassword(password,salt){let s=salt||crypto.getRandomValues(new Uint8Array(16)),k=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']),bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:s,iterations:100000,hash:'SHA-256'},k,256);return{salt:btoa(String.fromCharCode(...s)),hash:btoa(String.fromCharCode(...new Uint8Array(bits)))}}
 export async function verifyPassword(p, salt, expected) {
     try {
         if (
