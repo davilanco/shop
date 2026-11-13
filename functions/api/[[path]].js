@@ -15,7 +15,7 @@ async function aeTokenRequest(path,params,env){
  if(!env.ALIEXPRESS_APP_KEY||!env.ALIEXPRESS_APP_SECRET)throw Object.assign(Error('AliExpress app credentials are not configured.'),{status:503});
  const all={...params,app_key:env.ALIEXPRESS_APP_KEY,timestamp:String(Date.now()),sign_method:'sha256'};
  all.sign=await aeSignature(path,all,env.ALIEXPRESS_APP_SECRET);
- const response=await fetch('https://api-sg.aliexpress.com'+path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(all)});
+ const response=await fetch('https://api-sg.aliexpress.com/rest'+path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(all)});
  const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{throw Object.assign(Error('AliExpress returned an unreadable token response.'),{status:502})}
  if(!response.ok)throw Object.assign(Error('AliExpress token request failed ('+response.status+').'),{status:502});
  for(let i=0;i<3&&typeof data==='string';i++){try{data=JSON.parse(data)}catch{break}}
@@ -143,11 +143,11 @@ const aeData=x=>x?.data||x?.result||x;
 const aeProducts=x=>{let d=aeData(x);let a=d?.products||d?.product_list||d?.selection_search_product||d?.product||[];if(!Array.isArray(a)&&a&&typeof a==='object')a=Object.values(a);return Array.isArray(a)?a:[]};
 const aeProductId=x=>String(x?.itemId??x?.productId??x?.product_id??x?.item_id??'');
 const aeProductTitle=x=>String(x?.title??x?.product_title??x?.subject??'AliExpress product').slice(0,160);
-const aeProductImage=x=>String(x?.imageUrl??x?.image_url??x?.product_main_image_url??x?.image??'').slice(0,1000);
+const aeProductImage=x=>String(x?.itemMainPic??x?.imageUrl??x?.image_url??x?.product_main_image_url??x?.image??'').slice(0,1000);
 if(p==='aliexpress/search'&&m==='POST'){
  await requireUser(request,env,['admin']);let b=await body(request),keyword=String(b.keyWord||'').trim().slice(0,120),pageSize=Math.max(1,Math.min(50,Number(b.pageSize)||20)),pageIndex=Math.max(1,Number(b.pageIndex)||1);
  const result=await aeSyncCall('aliexpress.ds.text.search',{local:String(b.local||'en').slice(0,10),countryCode:String(b.countryCode||'NG').slice(0,2).toUpperCase(),currency:String(b.currency||'USD').slice(0,3).toUpperCase(),...(keyword?{keyWord:keyword}:{}),...(b.categoryId?{categoryId:String(b.categoryId)}:{}),...(b.sortBy?{sortBy:String(b.sortBy)}:{}),pageSize,pageIndex,...(b.selectionName?{selectionName:String(b.selectionName)}:{})},env);
- const d=aeData(result),items=aeProducts(result);return json({products:items.map(x=>({product_id:aeProductId(x),title:aeProductTitle(x),image:aeProductImage(x),product_url:String(x.productDetailUrl||x.product_url||x.itemUrl||''),price:x.salePrice||x.targetSalePrice||x.price||x.minPrice||'',orders:x.orders||x.lastest_volume||0,raw:x})).filter(x=>x.product_id),pageIndex:d?.pageIndex||pageIndex,pageSize:d?.pageSize||pageSize,totalCount:d?.totalCount||items.length});
+ const d=aeData(result),items=aeProducts(result);return json({products:items.map(x=>({product_id:aeProductId(x),title:aeProductTitle(x),image:aeProductImage(x),product_url:String(x.itemUrl||x.productDetailUrl||x.product_url||''),price:x.targetSalePrice||x.salePrice||x.price||x.minPrice||'',orders:x.orders||x.lastest_volume||0,raw:x})).filter(x=>x.product_id),pageIndex:d?.pageIndex||pageIndex,pageSize:d?.pageSize||pageSize,totalCount:d?.totalCount||items.length});
 }
 if(p==='aliexpress/details'&&m==='POST'){
  await requireUser(request,env,['admin']);let b=await body(request),productId=String(b.product_id||'').trim();if(!/^\d{5,30}$/.test(productId))return json({error:'Enter a valid AliExpress product ID.'},400);
@@ -156,19 +156,19 @@ if(p==='aliexpress/details'&&m==='POST'){
 }
 if(p==='aliexpress/freight'&&m==='POST'){
  await requireUser(request,env,['admin']);let b=await body(request),req=b.queryDeliveryReq||{};if(!req.productId||!req.selectedSkuId)return json({error:'Product and SKU are required for a freight quote.'},400);
- const result=await aeSyncCall('aliexpress.ds.freight.query',{queryDeliveryReq:{quantity:Math.max(1,Math.min(99,Number(req.quantity)||1)),shipToCountry:String(req.shipToCountry||'NG').toUpperCase(),productId:String(req.productId),...(req.provinceCode?{provinceCode:String(req.provinceCode)}:{}),...(req.cityCode?{cityCode:String(req.cityCode)}:{}),selectedSkuId:String(req.selectedSkuId),language:String(req.language||'en'),currency:String(req.currency||'USD')}},env);
+ const result=await aeSyncCall('aliexpress.ds.freight.query',{queryDeliveryReq:{quantity:Math.max(1,Math.min(99,Number(req.quantity)||1)),shipToCountry:String(req.shipToCountry||'NG').toUpperCase(),productId:String(req.productId),...(req.provinceCode?{province:String(req.province||''),provinceCode:String(req.provinceCode)}:{}),...(req.cityCode?{cityCode:String(req.cityCode)}:{}),selectedSkuId:String(req.selectedSkuId),language:String(req.language||'en'),currency:String(req.currency||'USD')}},env);
  return json({quote:aeData(result)});
 }
 if(p==='aliexpress/import'&&m==='POST'){
  const actor=await requireUser(request,env,['admin']);let b=await body(request),productId=String(b.product_id||''),sellingPrice=amount(b.selling_price);if(!/^\d{5,30}$/.test(productId)||!sellingPrice)return json({error:'Valid AliExpress product ID and selling price in NGN are required.'},400);
  const result=await aeSyncCall('aliexpress.ds.product.get',{ship_to_country:'NG',product_id:productId,target_currency:'USD',target_language:'en'},env),d=aeData(result),base=d?.ae商品基础信息||d?.aeProductBaseInfo||d?.product||d?.base_info||d;
- const title=aeProductTitle({title:base?.subject||base?.title||base?.product_title||d?.title}),image=aeProductImage({imageUrl:base?.imageUrl||base?.product_main_image_url||d?.imageUrl}),description=String(base?.detail||base?.description||d?.description||'Imported from AliExpress.').slice(0,3000);
+ const title=aeProductTitle({title:base?.subject||base?.title||base?.product_title||d?.title}),image=String(d?.ae_multimedia_info_dto?.image_urls||'').split(';')[0]||aeProductImage({imageUrl:base?.imageUrl||base?.product_main_image_url||d?.imageUrl}),description=String(base?.detail||base?.mobile_detail||base?.description||'Imported from AliExpress.').slice(0,3000);
  const id=uid(),skuList=d?.ae商品SKU信息||d?.aeSkuInfo||d?.sku_info||d?.skus||[];
  const skuRows=Array.isArray(skuList)?skuList:[];
  await env.DB.prepare("INSERT INTO products(id,seller_id,name,description,price,image,category,stock,status) VALUES(?,?,?,?,?,'','imported',0,'pending')").bind(id,actor.id,title,description,sellingPrice).run();
  await env.DB.prepare("UPDATE products SET image=? WHERE id=?").bind(image,id).run();
  await env.DB.prepare("INSERT INTO aliexpress_products(product_id,ae_product_id,product_url,supplier_name,supplier_status,source_currency,source_price,source_payload,last_synced_at) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(id,productId,String(b.product_url||''),'AliExpress','active','USD',Number(base?.min_price||base?.price||0)||null,JSON.stringify(d).slice(0,50000)).run();
- for(const s of skuRows){const skuId=String(s.skuId??s.sku_id??s.id??'');if(!skuId)continue;await env.DB.prepare("INSERT OR IGNORE INTO aliexpress_product_skus(id,product_id,ae_sku_id,sku_attributes,supplier_price,supplier_currency,available_stock,is_available,raw_payload) VALUES(?,?,?,?,?,?,?,?,?)").bind(uid(),id,skuId,JSON.stringify(s.attributes||s.skuAttr||[]),Number(s.price||s.skuPrice||0)||null,String(s.currency||'USD'),Math.max(0,Number(s.stock||s.inventory||0)),Number(s.stock||s.inventory||0)>0?1:0,JSON.stringify(s).slice(0,10000)).run();}
+ for(const s of skuRows){const skuId=String(s.sku_id??s.skuId??s.id??'');if(!skuId)continue;await env.DB.prepare("INSERT OR IGNORE INTO aliexpress_product_skus(id,product_id,ae_sku_id,sku_attributes,supplier_price,supplier_currency,available_stock,is_available,raw_payload) VALUES(?,?,?,?,?,?,?,?,?)").bind(uid(),id,skuId,JSON.stringify(s.ae_sku_property_dtos||s.sku_attr||[]),Number(s.offer_sale_price||s.sku_price||s.price||0)||null,String(s.currency||'USD'),Math.max(0,Number(s.sku_available_stock||s.stock||s.inventory||0)),Number(s.sku_available_stock||s.stock||s.inventory||0)>0?1:0,JSON.stringify(s).slice(0,10000)).run();}
  return json({ok:true,product_id:id,status:'pending',sku_count:skuRows.length,message:'Imported product submitted for admin approval.'},201);
 }
 if(p==='aliexpress/supplier-orders'&&m==='GET'){
