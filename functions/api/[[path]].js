@@ -122,6 +122,78 @@ if(p==='aliexpress/status'&&m==='GET'){
  return json({connected:!!c,access_expires_at:c?.access_expires_at||null,refresh_expires_at:c?.refresh_expires_at||null,updated_at:c?.updated_at||null});
 }
 
+
+async function aeSyncCall(method,business,env){
+ const current=await aeRefreshIfNeeded(env);
+ if(!current)throw Object.assign(Error('Connect AliExpress before using supplier tools.'),{status:409});
+ const token=await aeDecrypt(current.access_token_encrypted,env);
+ const params={...business,app_key:env.ALIEXPRESS_APP_KEY,method,session:token,timestamp:new Date().toISOString().replace(/\.\d{3}Z$/,'Z'),sign_method:'sha256',format:'json',v:'2.0'};
+ const text=Object.keys(params).filter(k=>params[k]!==undefined&&params[k]!==null).sort().map(k=>k+String(typeof params[k]==='object'?JSON.stringify(params[k]):params[k])).join('');
+ const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(env.ALIEXPRESS_APP_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ const sig=await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(text));
+ params.sign=[...new Uint8Array(sig)].map(x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+ const response=await fetch('https://api-sg.aliexpress.com/sync',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(Object.entries(params).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))});
+ const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{throw Object.assign(Error('AliExpress returned an unreadable API response.'),{status:502})}
+ if(!response.ok)throw Object.assign(Error('AliExpress API request failed ('+response.status+').'),{status:502});
+ const root=data?.[method.replace(/\./g,'_')+'_response']||data?.[method+'_response']||data;
+ if(root?.code&&String(root.code)!=='0'||root?.error_response)throw Object.assign(Error(String(root.msg||root.message||root.sub_msg||'AliExpress rejected the request.')), {status:502});
+ return root;
+}
+const aeData=x=>x?.data||x?.result||x;
+const aeProducts=x=>{let d=aeData(x);let a=d?.products||d?.product_list||d?.selection_search_product||d?.product||[];if(!Array.isArray(a)&&a&&typeof a==='object')a=Object.values(a);return Array.isArray(a)?a:[]};
+const aeProductId=x=>String(x?.itemId??x?.productId??x?.product_id??x?.item_id??'');
+const aeProductTitle=x=>String(x?.title??x?.product_title??x?.subject??'AliExpress product').slice(0,160);
+const aeProductImage=x=>String(x?.imageUrl??x?.image_url??x?.product_main_image_url??x?.image??'').slice(0,1000);
+if(p==='aliexpress/search'&&m==='POST'){
+ await requireUser(request,env,['admin']);let b=await body(request),keyword=String(b.keyWord||'').trim().slice(0,120),pageSize=Math.max(1,Math.min(50,Number(b.pageSize)||20)),pageIndex=Math.max(1,Number(b.pageIndex)||1);
+ const result=await aeSyncCall('aliexpress.ds.text.search',{local:String(b.local||'en').slice(0,10),countryCode:String(b.countryCode||'NG').slice(0,2).toUpperCase(),currency:String(b.currency||'USD').slice(0,3).toUpperCase(),...(keyword?{keyWord:keyword}:{}),...(b.categoryId?{categoryId:String(b.categoryId)}:{}),...(b.sortBy?{sortBy:String(b.sortBy)}:{}),pageSize,pageIndex,...(b.selectionName?{selectionName:String(b.selectionName)}:{})},env);
+ const d=aeData(result),items=aeProducts(result);return json({products:items.map(x=>({product_id:aeProductId(x),title:aeProductTitle(x),image:aeProductImage(x),product_url:String(x.productDetailUrl||x.product_url||x.itemUrl||''),price:x.salePrice||x.targetSalePrice||x.price||x.minPrice||'',orders:x.orders||x.lastest_volume||0,raw:x})).filter(x=>x.product_id),pageIndex:d?.pageIndex||pageIndex,pageSize:d?.pageSize||pageSize,totalCount:d?.totalCount||items.length});
+}
+if(p==='aliexpress/details'&&m==='POST'){
+ await requireUser(request,env,['admin']);let b=await body(request),productId=String(b.product_id||'').trim();if(!/^\d{5,30}$/.test(productId))return json({error:'Enter a valid AliExpress product ID.'},400);
+ const result=await aeSyncCall('aliexpress.ds.product.get',{ship_to_country:String(b.ship_to_country||'NG').toUpperCase(),product_id:productId,...(b.target_currency?{target_currency:String(b.target_currency)}:{}),target_language:String(b.target_language||'en'),...(b.province_code?{province_code:String(b.province_code)}:{}),...(b.city_code?{city_code:String(b.city_code)}:{})},env);
+ return json({product:aeData(result)});
+}
+if(p==='aliexpress/freight'&&m==='POST'){
+ await requireUser(request,env,['admin']);let b=await body(request),req=b.queryDeliveryReq||{};if(!req.productId||!req.selectedSkuId)return json({error:'Product and SKU are required for a freight quote.'},400);
+ const result=await aeSyncCall('aliexpress.ds.freight.query',{queryDeliveryReq:{quantity:Math.max(1,Math.min(99,Number(req.quantity)||1)),shipToCountry:String(req.shipToCountry||'NG').toUpperCase(),productId:String(req.productId),...(req.provinceCode?{provinceCode:String(req.provinceCode)}:{}),...(req.cityCode?{cityCode:String(req.cityCode)}:{}),selectedSkuId:String(req.selectedSkuId),language:String(req.language||'en'),currency:String(req.currency||'USD')}},env);
+ return json({quote:aeData(result)});
+}
+if(p==='aliexpress/import'&&m==='POST'){
+ const actor=await requireUser(request,env,['admin']);let b=await body(request),productId=String(b.product_id||''),sellingPrice=amount(b.selling_price);if(!/^\d{5,30}$/.test(productId)||!sellingPrice)return json({error:'Valid AliExpress product ID and selling price in NGN are required.'},400);
+ const result=await aeSyncCall('aliexpress.ds.product.get',{ship_to_country:'NG',product_id:productId,target_currency:'USD',target_language:'en'},env),d=aeData(result),base=d?.ae商品基础信息||d?.aeProductBaseInfo||d?.product||d?.base_info||d;
+ const title=aeProductTitle({title:base?.subject||base?.title||base?.product_title||d?.title}),image=aeProductImage({imageUrl:base?.imageUrl||base?.product_main_image_url||d?.imageUrl}),description=String(base?.detail||base?.description||d?.description||'Imported from AliExpress.').slice(0,3000);
+ const id=uid(),skuList=d?.ae商品SKU信息||d?.aeSkuInfo||d?.sku_info||d?.skus||[];
+ const skuRows=Array.isArray(skuList)?skuList:[];
+ await env.DB.prepare("INSERT INTO products(id,seller_id,name,description,price,image,category,stock,status) VALUES(?,?,?,?,?,'','imported',0,'pending')").bind(id,actor.id,title,description,sellingPrice).run();
+ await env.DB.prepare("UPDATE products SET image=? WHERE id=?").bind(image,id).run();
+ await env.DB.prepare("INSERT INTO aliexpress_products(product_id,ae_product_id,product_url,supplier_name,supplier_status,source_currency,source_price,source_payload,last_synced_at) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(id,productId,String(b.product_url||''),'AliExpress','active','USD',Number(base?.min_price||base?.price||0)||null,JSON.stringify(d).slice(0,50000)).run();
+ for(const s of skuRows){const skuId=String(s.skuId??s.sku_id??s.id??'');if(!skuId)continue;await env.DB.prepare("INSERT OR IGNORE INTO aliexpress_product_skus(id,product_id,ae_sku_id,sku_attributes,supplier_price,supplier_currency,available_stock,is_available,raw_payload) VALUES(?,?,?,?,?,?,?,?,?)").bind(uid(),id,skuId,JSON.stringify(s.attributes||s.skuAttr||[]),Number(s.price||s.skuPrice||0)||null,String(s.currency||'USD'),Math.max(0,Number(s.stock||s.inventory||0)),Number(s.stock||s.inventory||0)>0?1:0,JSON.stringify(s).slice(0,10000)).run();}
+ return json({ok:true,product_id:id,status:'pending',sku_count:skuRows.length,message:'Imported product submitted for admin approval.'},201);
+}
+if(p==='aliexpress/supplier-orders'&&m==='GET'){
+ await requireUser(request,env,['admin']);const rows=await env.DB.prepare("SELECT so.*,o.order_number,o.total AS local_total,o.payment_status AS local_payment_status FROM aliexpress_supplier_orders so JOIN orders o ON o.id=so.local_order_id ORDER BY so.created_at DESC LIMIT 100").all();return json({orders:rows.results});
+}
+if(p==='aliexpress/supplier-orders/prepare'&&m==='POST'){
+ const actor=await requireUser(request,env,['admin']);let b=await body(request),local=await env.DB.prepare("SELECT * FROM orders WHERE id=? AND payment_status='paid'").bind(String(b.order_id||'')).first();if(!local)return json({error:'Only a successfully paid local order can enter supplier review.'},409);
+ const exists=await env.DB.prepare('SELECT id FROM aliexpress_supplier_orders WHERE local_order_id=?').bind(local.id).first();if(exists)return json({error:'This local order already has a supplier-order review record.'},409);
+ const items=await env.DB.prepare('SELECT oi.*,ap.ae_product_id,sku.ae_sku_id FROM order_items oi JOIN aliexpress_products ap ON ap.product_id=oi.product_id LEFT JOIN aliexpress_product_skus sku ON sku.product_id=oi.product_id WHERE oi.order_id=?').bind(local.id).all();
+ if(!items.results.length||items.results.some(x=>!x.ae_product_id||!x.ae_sku_id))return json({error:'Every item must be linked to an AliExpress product and SKU before supplier review.'},409);
+ const id=uid(),out='DVL-'+crypto.randomUUID();await env.DB.prepare("INSERT INTO aliexpress_supplier_orders(id,local_order_id,out_order_id,status,payment_status,order_request_json) VALUES(?,?,?,'awaiting_admin_approval','not_requested',?)").bind(id,local.id,out,JSON.stringify({items:items.results.map(x=>({ae_product_id:x.ae_product_id,ae_sku_id:x.ae_sku_id,quantity:x.quantity}))})).run();
+ for(const x of items.results)await env.DB.prepare("INSERT INTO aliexpress_supplier_order_items(id,supplier_order_id,local_order_item_id,ae_product_id,ae_sku_id,quantity,supplier_unit_price,supplier_currency) VALUES(?,?,?,?,?,?,?,?)").bind(uid(),id,x.id,x.ae_product_id,x.ae_sku_id,x.quantity,x.unit_price,'NGN').run();
+ await env.DB.prepare("INSERT INTO aliexpress_approval_events(id,supplier_order_id,actor_user_id,event_type,note) VALUES(?,?,?,'prepared','Queued for admin review; no supplier order or payment was submitted.')").bind(uid(),id,actor.id).run();return json({ok:true,id,status:'awaiting_admin_approval',payment_status:'not_requested'},201);
+}
+if(p==='aliexpress/supplier-orders/decision'&&m==='POST'){
+ const actor=await requireUser(request,env,['admin']);let b=await body(request),id=String(b.supplier_order_id||''),decision=String(b.decision||''),note=String(b.note||'').slice(0,500);
+ const row=await env.DB.prepare('SELECT * FROM aliexpress_supplier_orders WHERE id=?').bind(id).first();if(!row)return json({error:'Supplier order review record not found.'},404);
+ if(decision==='approve'&&row.status==='awaiting_admin_approval'){await env.DB.prepare("UPDATE aliexpress_supplier_orders SET status='approved_for_submission',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_admin_approval'").bind(id).run();}
+ else if(decision==='reject'&&row.status==='awaiting_admin_approval'){await env.DB.prepare("UPDATE aliexpress_supplier_orders SET status='rejected',error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_admin_approval'").bind(note||'Rejected by admin.',id).run();}
+ else if(decision==='approve_payment'&&row.status==='approved_for_submission'&&row.payment_status==='not_requested'){await env.DB.prepare("UPDATE aliexpress_supplier_orders SET payment_status='approved_for_payment',payment_approved_by=?,payment_approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='approved_for_submission' AND payment_status='not_requested'").bind(actor.id,id).run();}
+ else return json({error:'This decision is not valid for the supplier order current state.'},409);
+ await env.DB.prepare("INSERT INTO aliexpress_approval_events(id,supplier_order_id,actor_user_id,event_type,note) VALUES(?,?,?,?,?)").bind(uid(),id,actor.id,decision==='approve'?'order_approved':decision==='reject'?'order_rejected':'payment_approved',note).run();
+ return json({ok:true,decision,warning:'No supplier order was placed and no supplier payment was made.'});
+}
+
 if(p==='ae-place-order'&&m==='POST'){await requireUser(request,env,['admin']);return json({error:'AliExpress ordering is disabled until a verified partner API and approval workflow are configured.'},503)}
 if(p==='ae-tracking'&&m==='GET'){await requireUser(request,env,['admin','seller']);return json({tracking:[],message:'Tracking provider not configured.'})}
 if(p==='ae-webhook'&&m==='POST'){if(!env.AE_WEBHOOK_SECRET)return json({error:'Webhook not configured.'},503);if(request.headers.get('x-davilanco-webhook-secret')!==env.AE_WEBHOOK_SECRET)return json({error:'Unauthorized webhook.'},401);return json({received:true})}
