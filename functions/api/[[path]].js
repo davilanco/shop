@@ -162,7 +162,7 @@ if(p==='aliexpress/freight'&&m==='POST'){
 }
 if(p==='aliexpress/import'&&m==='POST'){
  const actor=await requireUser(request,env,['admin']);let b=await body(request),productId=String(b.product_id||''),sellingPrice=amount(b.selling_price);if(!/^\d{5,30}$/.test(productId)||!sellingPrice)return json({error:'Valid AliExpress product ID and selling price in NGN are required.'},400);
- const result=await aeSyncCall('aliexpress.ds.product.get',{ship_to_country:'NG',product_id:productId,target_currency:'USD',target_language:'en'},env),d=aeData(result),base=d?.ae商品基础信息||d?.aeProductBaseInfo||d?.product||d?.base_info||d;
+ const result=await aeSyncCall('aliexpress.ds.product.get',{ship_to_country:'NG',product_id:productId,target_currency:'USD',target_language:'en'},env),d=aeData(result),base=d?.ae_item_base_info_dto||d?.product||d?.base_info||d;
  const title=aeProductTitle({title:base?.subject||base?.title||base?.product_title||d?.title}),image=String(d?.ae_multimedia_info_dto?.image_urls||'').split(';')[0]||aeProductImage({imageUrl:base?.imageUrl||base?.product_main_image_url||d?.imageUrl}),description=String(base?.detail||base?.mobile_detail||base?.description||'Imported from AliExpress.').slice(0,3000);
  const id=uid(),skuList=d?.ae_item_sku_info_dtos||d?.sku_info||d?.skus||[];
  const skuRows=Array.isArray(skuList)?skuList:[];
