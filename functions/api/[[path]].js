@@ -48,6 +48,32 @@ async function aeSaveTokens(data,env){
  await env.DB.prepare("INSERT INTO aliexpress_credentials(id,access_token_encrypted,refresh_token_encrypted,access_expires_at,refresh_expires_at,updated_at) VALUES('primary',?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET access_token_encrypted=excluded.access_token_encrypted,refresh_token_encrypted=excluded.refresh_token_encrypted,access_expires_at=excluded.access_expires_at,refresh_expires_at=excluded.refresh_expires_at,updated_at=CURRENT_TIMESTAMP").bind(access,refresh,accessExpiry,refreshExpiry).run();
 }
 
+
+async function aeDecrypt(value,env){
+ const [ivPart,dataPart]=String(value||'').split('.');
+ if(!ivPart||!dataPart)throw Error('Stored AliExpress token cannot be decrypted.');
+ const key=await aeEncryptionKey(env);
+ const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:aeB64ToBytes(ivPart)},key,aeB64ToBytes(dataPart));
+ return new TextDecoder().decode(plain);
+}
+async function aeRefreshIfNeeded(env){
+ const current=await env.DB.prepare("SELECT access_token_encrypted,refresh_token_encrypted,access_expires_at,refresh_expires_at FROM aliexpress_credentials WHERE id='primary'").first();
+ if(!current)return null;
+ const accessExpiry=Date.parse(current.access_expires_at||'');
+ if(Number.isFinite(accessExpiry)&&accessExpiry>Date.now()+30*60*1000)return current;
+ const refreshExpiry=Date.parse(current.refresh_expires_at||'');
+ if(!Number.isFinite(refreshExpiry)||refreshExpiry<=Date.now())throw Object.assign(Error('AliExpress refresh authorization has expired. Reconnect the account.'),{status:409});
+ const refreshToken=await aeDecrypt(current.refresh_token_encrypted,env);
+ const rotated=await aeTokenRequest('/auth/token/refresh',{refresh_token:refreshToken},env);
+ const access=await aeEncrypt(rotated.access_token,env),refresh=await aeEncrypt(rotated.refresh_token,env);
+ const result=await env.DB.prepare("UPDATE aliexpress_credentials SET access_token_encrypted=?,refresh_token_encrypted=?,access_expires_at=?,refresh_expires_at=?,updated_at=CURRENT_TIMESTAMP WHERE id='primary' AND refresh_token_encrypted=?").bind(access,refresh,aeExpiry(rotated,'expire_time','expires_in'),aeExpiry(rotated,'refresh_token_valid_time','refresh_expires_in'),current.refresh_token_encrypted).run();
+ if(!result.meta?.changes){
+  const latest=await env.DB.prepare("SELECT access_expires_at FROM aliexpress_credentials WHERE id='primary'").first();
+  if(!latest||Date.parse(latest.access_expires_at||'')<=Date.now())throw Object.assign(Error('AliExpress token refresh collided with another request. Please retry.'),{status:409});
+ }
+ return await env.DB.prepare("SELECT access_token_encrypted,refresh_token_encrypted,access_expires_at,refresh_expires_at FROM aliexpress_credentials WHERE id='primary'").first();
+}
+
 async function handler({request,env}){try{let u=new URL(request.url),p=u.pathname.replace(/^\/api\/?/,''),m=request.method;
 if(p==='session'&&m==='GET'){let user=await requireUser(request,env),[orders,refs]=await Promise.all([env.DB.prepare('SELECT order_number,status,total,created_at FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 30').bind(user.id).all(),env.DB.prepare('SELECT COUNT(*) n FROM users WHERE referred_by=?').bind(user.id).first()]);return json({user,orders:orders.results,referralCount:refs.n})}
 if(p==='auth/register'&&m==='POST'){let b=await body(request),name=String(b.name||'').trim(),email=String(b.email||'').trim().toLowerCase(),pw=String(b.password||'');if(name.length<2||name.length>100||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||pw.length<10||!/[0-9]/.test(pw)||!/[\W_]/.test(pw))return json({error:'Use a valid name/email and a password of 10+ characters with a number and symbol.'},400);if(await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(email).first())return json({error:'An account with this email already exists.'},409);let h=await hashPassword(pw),ref=b.referralCode?await env.DB.prepare('SELECT id FROM users WHERE referral_code=?').bind(String(b.referralCode).slice(0,32)).first():null,id=uid(),code=randomToken(7).toUpperCase();await env.DB.prepare('INSERT INTO users(id,name,email,password_salt,password_hash,role,referral_code,referred_by) VALUES(?,?,?,?,?,?,?,?)').bind(id,name,email,h.salt,h.hash,'customer',code,ref?.id||null).run();return session(id,env)}
@@ -92,7 +118,7 @@ if(p==='aliexpress/callback'&&m==='GET'){
 }
 if(p==='aliexpress/status'&&m==='GET'){
  await requireUser(request,env,['admin']);
- const c=await env.DB.prepare("SELECT access_expires_at,refresh_expires_at,updated_at FROM aliexpress_credentials WHERE id='primary'").first();
+ let c=await env.DB.prepare("SELECT access_expires_at,refresh_expires_at,updated_at FROM aliexpress_credentials WHERE id='primary'").first();if(c){await aeRefreshIfNeeded(env);c=await env.DB.prepare("SELECT access_expires_at,refresh_expires_at,updated_at FROM aliexpress_credentials WHERE id='primary'").first();}
  return json({connected:!!c,access_expires_at:c?.access_expires_at||null,refresh_expires_at:c?.refresh_expires_at||null,updated_at:c?.updated_at||null});
 }
 
