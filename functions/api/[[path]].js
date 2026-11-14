@@ -660,7 +660,7 @@ async function handler({ request, env }) {
       const result = await aeSyncCall(
         'aliexpress.ds.text.search',
         {
-          local: String(b.local || 'en').slice(0, 10),
+          local: String(b.local || 'en_US').slice(0, 10),
           countryCode: String(b.countryCode || 'NG').slice(0, 2).toUpperCase(),
           currency: String(b.currency || 'USD').slice(0, 3).toUpperCase(),
           ...(keyword ? { keyWord: keyword } : {}),
