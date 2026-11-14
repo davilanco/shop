@@ -609,7 +609,7 @@ async function handler({ request, env }) {
       }
       if (!response.ok) throw Object.assign(Error('AliExpress API request failed (' + response.status + ').'), { status: 502 });
       const root = data?.[method.replace(/\./g, '_') + '_response'] || data?.[method + '_response'] || data;
-      const aeError = root?.error_response || root?.errorResponse || (root?.code && String(root.code) !== '0' ? root : null);
+      const aeError = root?.error_response || root?.errorResponse || (root?.code && !['0', '00'].includes(String(root.code)) ? root : null);
       if (aeError) {
         const diagnostic = {
           code: String(aeError.code ?? aeError.error_code ?? root?.code ?? ''),
