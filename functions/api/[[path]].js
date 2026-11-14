@@ -625,11 +625,27 @@ async function handler({ request, env }) {
     const aeData = (x) => x?.data || x?.result || x;
 
     const aeProducts = (x) => {
-      let d = aeData(x);
-      let a = d?.products || d?.product_list || d?.selection_search_product || d?.product || [];
-      if (!Array.isArray(a) && a && typeof a === 'object') a = Object.values(a);
-      return Array.isArray(a) ? a : [];
-    };
+  let d = aeData(x);
+  let a =
+    d?.products?.selection_search_product ||
+    d?.products?.product ||
+    d?.products ||
+    d?.product_list?.selection_search_product ||
+    d?.product_list ||
+    d?.selection_search_product ||
+    d?.product ||
+    [];
+
+  if (!Array.isArray(a) && a && typeof a === 'object') {
+    a = Object.values(a);
+  }
+
+  if (Array.isArray(a) && a.length === 1 && Array.isArray(a[0])) {
+    a = a[0];
+  }
+
+  return Array.isArray(a) ? a : [];
+};
 
     const aeProductId = (x) => String(x?.itemId ?? x?.productId ?? x?.product_id ?? x?.item_id ?? '');
     const aeProductTitle = (x) => String(x?.title ?? x?.product_title ?? x?.subject ?? 'AliExpress product').slice(0, 160);
