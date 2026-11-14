@@ -1,5 +1,5 @@
 import{json,sha256,hashPassword,verifyPassword,randomToken,cookieHeader,clearCookie,requireUser,body}from'../lib/auth.js';
-const fail=e=>json({error:e.message||'Request failed'},e.status||500),uid=()=>crypto.randomUUID(),amount=n=>Number.isFinite(Number(n))&&Number(n)>0?Math.round(Number(n)):0;
+const fail=e=>json({error:e.message||'Request failed',...(e.aliexpressDiagnostic?{aliexpress_error_code:e.aliexpressDiagnostic.code||null,aliexpress_sub_code:e.aliexpressDiagnostic.sub_code||null,aliexpress_request_id:e.aliexpressDiagnostic.request_id||null}: {})},e.status||500),uid=()=>crypto.randomUUID(),amount=n=>Number.isFinite(Number(n))&&Number(n)>0?Math.round(Number(n)):0;
 async function session(userId,env){let t=randomToken(),expires=new Date(Date.now()+7*864e5).toISOString().replace('T',' ').slice(0,19);await env.DB.prepare('INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)').bind(uid(),userId,await sha256(t),expires).run();return json({ok:true},200,{'Set-Cookie':cookieHeader(t)})}
 
 const AE_CALLBACK='https://shop.davilanco.com/api/aliexpress/callback';
@@ -136,7 +136,12 @@ async function aeSyncCall(method,business,env){
  const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{throw Object.assign(Error('AliExpress returned an unreadable API response.'),{status:502})}
  if(!response.ok)throw Object.assign(Error('AliExpress API request failed ('+response.status+').'),{status:502});
  const root=data?.[method.replace(/\./g,'_')+'_response']||data?.[method+'_response']||data;
- if(root?.code&&String(root.code)!=='0'||root?.error_response)throw Object.assign(Error(String(root.msg||root.message||root.sub_msg||'AliExpress rejected the request.')), {status:502});
+ const aeError=root?.error_response||root?.errorResponse||(root?.code&&String(root.code)!=='0'?root:null);
+ if(aeError){
+  const diagnostic={code:String(aeError.code??aeError.error_code??root?.code??''),sub_code:String(aeError.sub_code??aeError.subCode??aeError.error_code??''),request_id:String(aeError.request_id??aeError.requestId??aeError.trace_id??root?.request_id??root?.requestId??'')};
+  const message=String(aeError.sub_msg||aeError.subMsg||aeError.msg||aeError.message||aeError.error_message||'AliExpress rejected the request.').slice(0,500);
+  throw Object.assign(Error(message),{status:502,aliexpressDiagnostic:diagnostic});
+ }
  return root;
 }
 const aeData=x=>x?.data||x?.result||x;
