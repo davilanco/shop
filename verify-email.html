@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Verify email</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px;
+           margin: 64px auto; padding: 0 20px; color: #111; }
+    button { background:#111; color:#fff; border:0; padding:12px 20px;
+             border-radius:6px; font-size:16px; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .msg { margin-top:20px; }
+    .err { color:#b00020; }
+  </style>
+</head>
+<body>
+  <h1>Verify your email</h1>
+  <p id="intro">Click the button below to confirm your email address.</p>
+  <button id="confirm">Confirm email</button>
+  <div id="msg" class="msg"></div>
+
+  <script>
+    const token = new URLSearchParams(location.search).get('token') || '';
+    const btn = document.getElementById('confirm');
+    const msg = document.getElementById('msg');
+
+    if (!token) {
+      btn.disabled = true;
+      msg.textContent = 'Missing verification token.';
+      msg.className = 'msg err';
+    }
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      msg.textContent = 'Verifying…';
+      msg.className = 'msg';
+      try {
+        const res = await fetch('/api/auth/verify-email', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          msg.textContent = data.already_verified
+            ? 'Already verified. You can close this tab.'
+            : 'Email verified. You can close this tab and log in.';
+        } else if (data.error === 'expired') {
+          msg.textContent = 'This link has expired. Log in and request a new one.';
+          msg.className = 'msg err';
+        } else {
+          msg.textContent = 'Invalid or already-used link.';
+          msg.className = 'msg err';
+        }
+      } catch {
+        msg.textContent = 'Network error. Please try again.';
+        msg.className = 'msg err';
+      }
+    });
+  </script>
+</body>
+</html>
