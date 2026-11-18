@@ -538,6 +538,11 @@ function setupTestingWarning() {
 
     try {
       // Save am - use your existing messages API
+      await api('subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+       });
+      
       await api('messages', {
         method: 'POST',
         body: JSON.stringify({
