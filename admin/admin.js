@@ -46,6 +46,34 @@
  return d;
         }
 
+async function setupNavDrawerAndRole(){
+  const drawer=document.getElementById('navDrawer');
+  const back=document.getElementById('drawerBackdrop');
+  const openBtn=document.getElementById('menuToggle');
+  const closeBtn=document.getElementById('menuClose');
+  const close=()=>{drawer?.classList.remove('open');drawer?.setAttribute('aria-hidden','true');if(back)back.hidden=true;openBtn?.setAttribute('aria-expanded','false')};
+  const open=()=>{drawer?.classList.add('open');drawer?.setAttribute('aria-hidden','false');if(back)back.hidden=false;openBtn?.setAttribute('aria-expanded','true')};
+  openBtn?.addEventListener('click',open);
+  closeBtn?.addEventListener('click',close);
+  back?.addEventListener('click',close);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+
+  document.getElementById('logoutNav')?.addEventListener('click',async()=>{
+    await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'});
+    location.href='/login.html';
+  });
+
+  try{
+    const r=await fetch('/api/session',{credentials:'same-origin',cache:'no-store'});
+    if(!r.ok)return;
+    const {user:u}=await r.json();
+    const navSeller=document.getElementById('navSeller');
+    const navAdmin=document.getElementById('navAdmin');
+    if(navSeller)navSeller.hidden=!['seller','admin'].includes(u.role);
+    if(navAdmin)navAdmin.hidden=u.role!=='admin';
+  }catch{}
+}
+  
   async function loadAeSupplierOrders() {
     if (!$('#aeSupplierOrders')) return;
     try {
@@ -297,5 +325,8 @@
     }
   };
 
-  document.addEventListener('DOMContentLoaded', load);
+  document.addEventListener('DOMContentLoaded', () => {
+  setupNavDrawerAndRole();
+  load();
+});
 })();
