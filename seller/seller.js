@@ -125,8 +125,8 @@
   };
 
   // ✅ NEW - BEST LINE TO CALL AM
-document.addEventListener('DOMContentLoaded', () => {
-  load();
+  document.addEventListener('DOMContentLoaded', () => {
   setupNavDrawerAndRole();
+  load();
 });
   })();
