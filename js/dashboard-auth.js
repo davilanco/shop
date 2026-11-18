@@ -1,1 +1,104 @@
-document.addEventListener('DOMContentLoaded',async()=>{const $=s=>document.querySelector(s),loading=$('#dashboardLoading'),content=$('#dashboardContent'),msg=$('#dashboardMessage');try{let r=await fetch('/api/session',{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('Please sign in.');let d=await r.json(),u=d.user;$('#userName').textContent=u.name;$('#userEmail').textContent=u.email;$('#userRole').textContent=u.role;let link=location.origin+'/login.html?ref='+encodeURIComponent(u.referral_code);$('#referralLink').textContent=link;$('#copyReferral').onclick=async()=>{await navigator.clipboard.writeText(link);msg.textContent='Referral link copied.'};$('#referralStats').textContent='Successful referrals: '+d.referralCount;$('#orderHistory').innerHTML=d.orders.length?d.orders.map(o=>'<p><b>'+String(o.order_number).replace(/[&<>]/g,'')+'</b> · '+String(o.status).replace(/[&<>]/g,'')+'</p>').join(''):'<p class="muted">Your orders will appear here.</p>';loading.hidden=true;content.hidden=false;$('#logoutButton').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'});location.href='/login.html'};for(let [id,path] of [['passwordForm','auth/password'],['messageForm','messages'],['sellerApplyForm','seller/apply']])$('#'+id).onsubmit=async e=>{e.preventDefault();let f=e.currentTarget;try{let x=await fetch('/api/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(f)))}),j=await x.json();if(!x.ok)throw Error(j.error);msg.textContent='Submitted successfully.';f.reset()}catch(x){msg.textContent=x.message}}}catch(e){loading.textContent=e.message+' Redirecting…';location.replace('/login.html?redirect='+encodeURIComponent('/dashboard.html'))}});
+document.addEventListener('DOMContentLoaded', async () => {
+  const $ = (selector) => document.querySelector(selector);
+
+  const loading = $('#dashboardLoading');
+  const content = $('#dashboardContent');
+  const message = $('#dashboardMessage');
+
+  try {
+    // ---------- 1. Check session ----------
+    const res = await fetch('/api/session', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+
+    if (!res.ok) throw Error('Please sign in.');
+
+    const data = await res.json();
+    const user = data.user;
+
+    // ---------- 2. Fill user info ----------
+    $('#userName').textContent = user.name;
+    $('#userEmail').textContent = user.email;
+    $('#userRole').textContent = user.role;
+
+    // ---------- 3. Referral link ----------
+    const referralLink =
+      location.origin + '/login.html?ref=' + encodeURIComponent(user.referral_code);
+
+    $('#referralLink').textContent = referralLink;
+    $('#referralStats').textContent = 'Successful referrals: ' + data.referralCount;
+
+    $('#copyReferral').onclick = async () => {
+      await navigator.clipboard.writeText(referralLink);
+      message.textContent = 'Referral link copied.';
+    };
+
+    // ---------- 4. Order history ----------
+    const esc = (s) => String(s).replace(/[&<>]/g, '');
+
+    $('#orderHistory').innerHTML = data.orders.length
+      ? data.orders
+          .map(
+            (order) => `
+              <p>
+                <b>${esc(order.order_number)}</b> · ${esc(order.status)}
+              </p>
+            `
+          )
+          .join('')
+      : '<p class="muted">Your orders will appear here.</p>';
+
+    // ---------- 5. Show dashboard ----------
+    loading.hidden = true;
+    content.hidden = false;
+
+    // ---------- 6. Logout ----------
+    $('#logoutButton').onclick = async () => {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      location.href = '/login.html';
+    };
+
+    // ---------- 7. All small forms ----------
+    // passwordForm, messageForm, sellerApplyForm
+    const forms = [
+      ['passwordForm', 'auth/password'],
+      ['messageForm', 'messages'],
+      ['sellerApplyForm', 'seller/apply'],
+    ];
+
+    for (const [formId, apiPath] of forms) {
+      const form = $('#' + formId);
+      if (!form) continue;
+
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const response = await fetch('/api/' + apiPath, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.fromEntries(new FormData(form))),
+          });
+
+          const result = await response.json();
+          if (!response.ok) throw Error(result.error);
+
+          message.textContent = 'Submitted successfully.';
+          form.reset();
+        } catch (err) {
+          message.textContent = err.message;
+        }
+      };
+    }
+  } catch (err) {
+    // ---------- Not logged in ----------
+    loading.textContent = err.message + ' Redirecting…';
+    location.replace(
+      '/login.html?redirect=' + encodeURIComponent('/dashboard.html')
+    );
+  }
+});
