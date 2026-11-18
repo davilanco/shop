@@ -22,7 +22,7 @@
   <button id="confirm">Confirm email</button>
   <div id="msg" class="msg"></div>
 
-  <script>
+  <script defer src="script.js">
     const token = new URLSearchParams(location.search).get('token') || '';
     const btn = document.getElementById('confirm');
     const msg = document.getElementById('msg');
