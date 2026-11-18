@@ -498,6 +498,8 @@
   // ---------- Init ----------
   async function init() {
     updateCartCount();
+    // Inside init(), after updateCartCount();
+setupTestingWarning();
 
     if ($('#year')) {
       $('#year').textContent = new Date().getFullYear();
