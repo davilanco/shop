@@ -1,5 +1,5 @@
-import { sha256Hex, generateToken, json } from '../../_lib/tokens.js';
-import { sendEmail, verificationEmailHtml } from '../../_lib/email.js';
+import { sha256Hex, generateToken, json } from '../../lib/tokens.js';
+import { sendEmail, verificationEmailHtml } from '../../lib/email.js';
 
 export async function onRequestPost({ request, env }) {
   // Adapt to your session helper — whatever your other auth endpoints use
