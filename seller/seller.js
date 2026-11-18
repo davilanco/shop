@@ -124,5 +124,9 @@
     }
   };
 
-  document.addEventListener('DOMContentLoaded', load);
-})();
+  // ✅ NEW - BEST LINE TO CALL AM
+document.addEventListener('DOMContentLoaded', () => {
+  load();
+  setupNavDrawerAndRole();
+});
+  })();
