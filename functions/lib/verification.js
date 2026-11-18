@@ -1,3 +1,5 @@
+import { generateToken, sha256Hex } from './tokens.js';
+import { sendEmail, verificationEmailHtml } from './email.js';
 export async function issueVerification(env, user) {
   const raw = generateToken();
   const hash = await sha256Hex(raw);
