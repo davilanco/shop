@@ -355,6 +355,39 @@
       });
   }
 
+  //---- NavAuth ----
+async function updateNavAuth() {
+  const account = document.getElementById('navAccount');
+  const authLink = document.getElementById('navAuth');
+  const footerAccount = document.getElementById('footerAccount');
+  if (!authLink) return;
+
+  try {
+    const r = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' });
+    if (!r.ok) throw new Error('not signed in');
+
+    // Logged in → show Dashboard, change link to Logout
+    if (account) account.hidden = false;
+    if (footerAccount) footerAccount.hidden = false;
+
+    authLink.textContent = 'Sign out';
+    authLink.href = '#';
+    authLink.onclick = async (e) => {
+      e.preventDefault();
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      location.href = '/';
+    };
+  } catch {
+    // Logged out → hide Dashboard, show Sign in
+    if (account) account.hidden = true;
+    if (footerAccount) footerAccount.hidden = true;
+
+    authLink.textContent = 'Sign in / Register';
+    authLink.href = '/login.html';
+    authLink.onclick = null;
+  }
+}
+  
   // ---------- Init ----------
   function init() {
     updateCartCount();
@@ -478,6 +511,7 @@
     auth();
     checkout();
     payment();
+    updateNavAuth();
   }
 
   document.addEventListener('DOMContentLoaded', init);
