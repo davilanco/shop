@@ -4,19 +4,11 @@
   // ---------- Helpers ----------
   const $ = (selector) => document.querySelector(selector);
 
-  const esc = (s) =>
-    String(s ?? '').replace(
-      /[&<>"']/g,
-      (c) =>
-        ({
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-          "'": '&#39;',
-        }[c])
-    );
-
+  const esc = (s) => String(s ?? '').replace(
+  /[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+)
+  
   const money = (n) =>
     new Intl.NumberFormat('en-NG', {
       style: 'currency',
@@ -584,35 +576,30 @@ function setupTestingWarning() {
   }
 
   function buildModal() {
-    const el = document.createElement('div');
-    el.id = 'vp-modal';
-    el.setAttribute('role', 'dialog');
-    el.setAttribute('aria-modal', 'true');
-    el.setAttribute('aria-labelledby', 'vp-title');
-    el.style.cssText =
-      'position:fixed;inset:0;z-index:9999;display:none;align-items:center;' +
-      'justify-content:center;background:rgba(0,0,0,.5);padding:20px;';
-    el.innerHTML = `
-      <div style="background:#fff;max-width:440px;width:100%;border-radius:10px;padding:24px;
-                  box-shadow:0 20px 60px rgba(0,0,0,.2);font-family:system-ui,sans-serif;">
-        <h2 id="vp-title" style="margin:0 0 12px;font-size:20px;">Verify your email</h2>
-        <p style="margin:0 0 20px;color:#444;line-height:1.5;">
-          We sent a verification link to <strong id="vp-email"></strong>.
-          Please verify to place orders.
-        </p>
-        <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="vp-later" type="button"
-            style="background:transparent;border:1px solid #ccc;padding:10px 16px;
-                   border-radius:6px;cursor:pointer;font-size:14px;">Verify later</button>
-          <button id="vp-resend" type="button"
-            style="background:#111;color:#fff;border:0;padding:10px 16px;
-                   border-radius:6px;cursor:pointer;font-size:14px;">Resend email</button>
-        </div>
-        <p id="vp-status" style="margin:12px 0 0;font-size:13px;color:#666;min-height:18px;"></p>
-      </div>`;
-    document.body.appendChild(el);
-    return el;
-  }
+  const el = document.createElement('div');
+  el.id = 'vp-modal';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.setAttribute('aria-labelledby', 'vp-title');
+  el.style.cssText =
+    'position:fixed;inset:0;z-index:9999;display:none;align-items:center;' +
+    'justify-content:center;background:rgba(0,0,0,.5);padding:20px;';
+  el.innerHTML = `
+    <div style="background:#fff;max-width:440px;width:100%;border-radius:10px;padding:24px;font-family:system-ui,sans-serif;">
+      <h2 id="vp-title" style="margin:0 0 12px;font-size:20px;">Verify your email</h2>
+      <p style="margin:0 0 20px;color:#444;line-height:1.5;">
+        We sent a verification link to <strong id="vp-email"></strong>.
+        Please verify to place orders.
+      </p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="vp-later" type="button" style="background:transparent;border:1px solid #ccc;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:14px;">Verify later</button>
+        <button id="vp-resend" type="button" style="background:#111;color:#fff;border:0;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:14px;">Resend email</button>
+      </div>
+      <p id="vp-status" style="margin:12px 0 0;font-size:13px;color:#666;min-height:18px;"></p>
+    </div>`;
+  document.body.appendChild(el);
+  return el;
+}
 
   function buildBanner() {
     const el = document.createElement('div');
@@ -705,14 +692,16 @@ function setupTestingWarning() {
   }
 
   function showModal(email) {
-    if (email) lastEmail = email;
-    document.getElementById('vp-email').textContent = lastEmail || 'your email';
-    modal.style.display = 'flex';
-    banner.style.display = 'none';
-    restoreCooldown();
-    document.getElementById('vp-resend').focus();
-  }
-
+  if (email) lastEmail = email;
+  const emailEl = document.getElementById('vp-email');
+  if (emailEl) emailEl.textContent = lastEmail || 'your email';
+  modal.style.display = 'flex';
+  banner.style.display = 'none';
+  restoreCooldown();
+  document.getElementById('vp-resend')?.focus();
+}
+  
+  
   function hideModal(dismissed) {
     modal.style.display = 'none';
     if (dismissed) {
