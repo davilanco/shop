@@ -564,6 +564,210 @@ function setupTestingWarning() {
   });
 }
 
+    // /assets/verify-prompt.js
+(function () {
+  'use strict';
+
+  const SESSION_KEY = 'verify_prompt_dismissed';
+  const COOLDOWN_KEY = 'verify_cooldown_until';
+
+  let modal, banner, cooldownTimer, lastEmail = '';
+
+  async function fetchMe() {
+    try {
+      const r = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function buildModal() {
+    const el = document.createElement('div');
+    el.id = 'vp-modal';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', 'vp-title');
+    el.style.cssText =
+      'position:fixed;inset:0;z-index:9999;display:none;align-items:center;' +
+      'justify-content:center;background:rgba(0,0,0,.5);padding:20px;';
+    el.innerHTML = `
+      <div style="background:#fff;max-width:440px;width:100%;border-radius:10px;padding:24px;
+                  box-shadow:0 20px 60px rgba(0,0,0,.2);font-family:system-ui,sans-serif;">
+        <h2 id="vp-title" style="margin:0 0 12px;font-size:20px;">Verify your email</h2>
+        <p style="margin:0 0 20px;color:#444;line-height:1.5;">
+          We sent a verification link to <strong id="vp-email"></strong>.
+          Please verify to place orders.
+        </p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="vp-later" type="button"
+            style="background:transparent;border:1px solid #ccc;padding:10px 16px;
+                   border-radius:6px;cursor:pointer;font-size:14px;">Verify later</button>
+          <button id="vp-resend" type="button"
+            style="background:#111;color:#fff;border:0;padding:10px 16px;
+                   border-radius:6px;cursor:pointer;font-size:14px;">Resend email</button>
+        </div>
+        <p id="vp-status" style="margin:12px 0 0;font-size:13px;color:#666;min-height:18px;"></p>
+      </div>`;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function buildBanner() {
+    const el = document.createElement('div');
+    el.id = 'vp-banner';
+    el.style.cssText =
+      'position:fixed;top:0;left:0;right:0;z-index:9998;background:#fff3cd;color:#664d03;' +
+      'border-bottom:1px solid #ffc107;padding:10px 16px;font-family:system-ui,sans-serif;' +
+      'font-size:14px;display:none;align-items:center;justify-content:center;gap:12px;';
+    el.innerHTML = `
+      <span>Your email isn't verified. You can't place orders until you verify.</span>
+      <button id="vp-banner-open" type="button"
+        style="background:#111;color:#fff;border:0;padding:6px 12px;
+               border-radius:6px;cursor:pointer;font-size:13px;">Verify now</button>`;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function setStatus(text, isError) {
+    const s = document.getElementById('vp-status');
+    if (!s) return;
+    s.textContent = text;
+    s.style.color = isError ? '#b00020' : '#666';
+  }
+
+  function setResend(disabled, label) {
+    const b = document.getElementById('vp-resend');
+    if (!b) return;
+    b.disabled = disabled;
+    b.style.opacity = disabled ? '.6' : '1';
+    b.style.cursor = disabled ? 'not-allowed' : 'pointer';
+    if (label) b.textContent = label;
+  }
+
+  function startCooldown(seconds) {
+    const until = Date.now() + seconds * 1000;
+    localStorage.setItem(COOLDOWN_KEY, String(until));
+    clearInterval(cooldownTimer);
+    const tick = () => {
+      const left = Math.ceil((until - Date.now()) / 1000);
+      if (left <= 0) {
+        clearInterval(cooldownTimer);
+        localStorage.removeItem(COOLDOWN_KEY);
+        setResend(false, 'Resend email');
+        return;
+      }
+      setResend(true, `Resend in ${left}s`);
+    };
+    tick();
+    cooldownTimer = setInterval(tick, 1000);
+  }
+
+  function restoreCooldown() {
+    const until = Number(localStorage.getItem(COOLDOWN_KEY) || 0);
+    if (until > Date.now()) startCooldown(Math.ceil((until - Date.now()) / 1000));
+  }
+
+  async function resend() {
+    setResend(true, 'Sending…');
+    setStatus('');
+    try {
+      const r = await fetch('/api/auth/send-verification', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+      });
+      const data = await r.json().catch(() => ({}));
+
+      if (r.ok) {
+        setStatus('Verification email sent. Check your inbox.');
+        startCooldown(60);
+        return;
+      }
+      if (r.status === 429) {
+        const s = data.retry_after || 60;
+        setStatus(`Please wait ${s}s before requesting again.`, true);
+        startCooldown(s);
+        return;
+      }
+      if (data.error === 'already_verified') {
+        setStatus('Already verified. Reloading…');
+        setTimeout(() => location.reload(), 800);
+        return;
+      }
+      setStatus('Could not send. Try again later.', true);
+      setResend(false, 'Resend email');
+    } catch {
+      setStatus('Network error. Try again.', true);
+      setResend(false, 'Resend email');
+    }
+  }
+
+  function showModal(email) {
+    if (email) lastEmail = email;
+    document.getElementById('vp-email').textContent = lastEmail || 'your email';
+    modal.style.display = 'flex';
+    banner.style.display = 'none';
+    restoreCooldown();
+    document.getElementById('vp-resend').focus();
+  }
+
+  function hideModal(dismissed) {
+    modal.style.display = 'none';
+    if (dismissed) {
+      sessionStorage.setItem(SESSION_KEY, '1');
+      banner.style.display = 'flex';
+      document.body.style.paddingTop =
+        Math.max(parseInt(getComputedStyle(document.body).paddingTop) || 0, banner.offsetHeight) + 'px';
+    }
+  }
+
+  async function check(force) {
+    const me = await fetchMe();
+    if (!me || me.email_verified) {
+      if (modal) modal.style.display = 'none';
+      if (banner) banner.style.display = 'none';
+      sessionStorage.removeItem(SESSION_KEY);
+      return;
+    }
+    lastEmail = me.email;
+    const dismissed = sessionStorage.getItem(SESSION_KEY) === '1';
+    if (!dismissed || force) showModal(me.email);
+    else banner.style.display = 'flex';
+  }
+
+  function init() {
+    modal = buildModal();
+    banner = buildBanner();
+
+    document.getElementById('vp-later').addEventListener('click', () => hideModal(true));
+    document.getElementById('vp-resend').addEventListener('click', resend);
+    document.getElementById('vp-banner-open').addEventListener('click', () => showModal());
+    modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(true); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') hideModal(true);
+    });
+
+    check(false);
+
+    let lastFocus = 0;
+    window.addEventListener('focus', () => {
+      if (Date.now() - lastFocus < 5000) return;
+      lastFocus = Date.now();
+      check(false);
+    });
+
+    window.__verifyPrompt = { open: (email) => showModal(email) };
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+
     // Theme
     document.documentElement.dataset.theme =
       localStorage.getItem('davilanco_theme') || 'dark';
