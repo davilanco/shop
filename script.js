@@ -503,6 +503,60 @@
       $('#year').textContent = new Date().getFullYear();
     }
 
+    // ---------- Testing Warning ----------
+function setupTestingWarning() {
+  const banner = $('#testingBanner');
+  const modal = $('#notifyModal');
+  if (!banner || !modal) return;
+
+  // If user don close before, hide banner but still show button? We keep am always for testing
+  // If you wan hide after close, uncomment next line:
+  // if (localStorage.getItem('davilanco_hide_testing') === '1') banner.hidden = true;
+
+  const openModal = () => { modal.hidden = false; };
+  const closeModal = () => { modal.hidden = true; };
+
+  $('#testingNotifyBtn')?.addEventListener('click', openModal);
+  $('#notifyCloseBtn')?.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  $('#testingCloseBtn')?.addEventListener('click', () => {
+    banner.hidden = true;
+    // localStorage.setItem('davilanco_hide_testing', '1');
+  });
+
+  // Subscribe form
+  $('#notifyForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('#notifyEmail').value.trim();
+    const msg = $('#notifyMessage');
+    msg.textContent = 'Please wait…';
+
+    try {
+      // Save am - use your existing messages API
+      await api('messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Notify Me Subscriber',
+          email: email,
+          message: 'Notify me when Davilanco goes live.'
+        }),
+      });
+      msg.textContent = 'Done! We go notify you when we go live. ✅';
+      e.target.reset();
+      setTimeout(closeModal, 1500);
+    } catch (err) {
+      // Fallback if API no dey: save for local
+      const list = JSON.parse(localStorage.getItem('davilanco_notify_list') || '[]');
+      list.push({ email, date: new Date().toISOString() });
+      localStorage.setItem('davilanco_notify_list', JSON.stringify(list));
+      msg.textContent = 'Saved! We go notify you when we go live. ✅';
+    }
+  });
+}
+
     // Theme
     document.documentElement.dataset.theme =
       localStorage.getItem('davilanco_theme') || 'dark';
