@@ -82,6 +82,27 @@
     return data;
   }
 
+  // Fetch session ONCE and reuse everywhere
+  async function getSessionOnce() {
+    try {
+      const res = await fetch('/api/session', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+  }
+
   // ---------- Products ----------
   function productCard(p) {
     return `
@@ -226,7 +247,7 @@
     `;
   }
 
-  // ---------- Auth ----------
+  // ---------- Auth (Login / Register page) ----------
   function auth() {
     const loginForm = $('#loginForm');
     const registerForm = $('#registerForm');
@@ -355,41 +376,127 @@
       });
   }
 
-  //---- NavAuth ----
-async function updateNavAuth() {
-  const account = document.getElementById('navAccount');
-  const authLink = document.getElementById('navAuth');
-  const footerAccount = document.getElementById('footerAccount');
-  if (!authLink) return;
+  // ---------- Nav Auth - uses session already fetched ----------
+  function updateNavAuth(sessionData) {
+    const account = $('#navAccount');
+    const authLink = $('#navAuth');
+    const footerAccount = $('#footerAccount');
+    if (!authLink) return;
 
-  try {
-    const r = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' });
-    if (!r.ok) throw new Error('not signed in');
+    if (sessionData?.user) {
+      // Logged in
+      if (account) account.hidden = false;
+      if (footerAccount) footerAccount.hidden = false;
 
-    // Logged in → show Dashboard, change link to Logout
-    if (account) account.hidden = false;
-    if (footerAccount) footerAccount.hidden = false;
+      authLink.textContent = 'Sign out';
+      authLink.href = '#';
+      authLink.onclick = async (e) => {
+        e.preventDefault();
+        await logout();
+        location.href = '/';
+      };
+    } else {
+      // Logged out
+      if (account) account.hidden = true;
+      if (footerAccount) footerAccount.hidden = true;
 
-    authLink.textContent = 'Sign out';
-    authLink.href = '#';
-    authLink.onclick = async (e) => {
-      e.preventDefault();
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
-      location.href = '/';
-    };
-  } catch {
-    // Logged out → hide Dashboard, show Sign in
-    if (account) account.hidden = true;
-    if (footerAccount) footerAccount.hidden = true;
-
-    authLink.textContent = 'Sign in / Register';
-    authLink.href = '/login.html';
-    authLink.onclick = null;
+      authLink.textContent = 'Sign in / Register';
+      authLink.href = '/login.html';
+      authLink.onclick = null;
+    }
   }
-}
-  
+
+  // ---------- Dashboard - uses SAME session ----------
+  function initDashboard(sessionData) {
+    const loading = $('#dashboardLoading');
+    const content = $('#dashboardContent');
+    const message = $('#dashboardMessage');
+    if (!loading || !content) return; // not on dashboard page
+
+    // Not logged in -> redirect, no second fetch
+    if (!sessionData?.user) {
+      loading.textContent = 'Please sign in. Redirecting…';
+      location.replace(
+        '/login.html?redirect=' + encodeURIComponent('/dashboard.html')
+      );
+      return;
+    }
+
+    const user = sessionData.user;
+
+    // User info
+    $('#userName').textContent = user.name;
+    $('#userEmail').textContent = user.email;
+    $('#userRole').textContent = user.role;
+
+    // Referral
+    const referralLink =
+      location.origin + '/login.html?ref=' + encodeURIComponent(user.referral_code);
+
+    $('#referralLink').textContent = referralLink;
+    $('#referralStats').textContent =
+      'Successful referrals: ' + (sessionData.referralCount || 0);
+
+    $('#copyReferral').onclick = async () => {
+      await navigator.clipboard.writeText(referralLink);
+      message.textContent = 'Referral link copied.';
+    };
+
+    // Orders - now uses the strong esc from top
+    const orders = sessionData.orders || [];
+    $('#orderHistory').innerHTML = orders.length
+      ? orders
+          .map(
+            (order) => `
+              <p><b>${esc(order.order_number)}</b> · ${esc(order.status)}</p>
+            `
+          )
+          .join('')
+      : '<p class="muted">Your orders will appear here.</p>';
+
+    loading.hidden = true;
+    content.hidden = false;
+
+    // Dashboard logout button - same logout() helper
+    $('#logoutButton').onclick = async () => {
+      await logout();
+      location.href = '/login.html';
+    };
+
+    // Dashboard small forms
+    const forms = [
+      ['passwordForm', 'auth/password'],
+      ['messageForm', 'messages'],
+      ['sellerApplyForm', 'seller/apply'],
+    ];
+
+    for (const [formId, apiPath] of forms) {
+      const form = $('#' + formId);
+      if (!form) continue;
+
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const response = await fetch('/api/' + apiPath, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.fromEntries(new FormData(form))),
+          });
+          const result = await response.json();
+          if (!response.ok) throw Error(result.error);
+
+          message.textContent = 'Submitted successfully.';
+          form.reset();
+        } catch (err) {
+          message.textContent = err.message;
+        }
+      };
+    }
+  }
+
   // ---------- Init ----------
-  function init() {
+  async function init() {
     updateCartCount();
 
     if ($('#year')) {
@@ -453,8 +560,7 @@ async function updateNavAuth() {
         if (item) {
           item.quantity += Number(qtyBtn.dataset.delta);
           if (item.quantity < 1) {
-            const filtered = cart.filter((y) => y !== item);
-            saveCart(filtered);
+            saveCart(cart.filter((y) => y !== item));
           } else {
             saveCart(cart);
           }
@@ -511,7 +617,11 @@ async function updateNavAuth() {
     auth();
     checkout();
     payment();
-    updateNavAuth();
+
+    // ONE session fetch for nav + dashboard
+    const sessionData = await getSessionOnce();
+    updateNavAuth(sessionData);
+    initDashboard(sessionData);
   }
 
   document.addEventListener('DOMContentLoaded', init);
