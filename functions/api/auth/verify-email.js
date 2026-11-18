@@ -1,4 +1,4 @@
-import { sha256Hex, json } from '../../_lib/tokens.js';
+import { sha256Hex, json } from '../../lib/tokens.js';
 
 export async function onRequestPost({ request, env }) {
   let body;
