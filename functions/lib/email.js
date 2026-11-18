@@ -10,7 +10,7 @@ export async function sendEmail(env, { to, subject, html, text }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: env.EMAIL_FROM || 'Shop <noreply@example.com>',
+      from: env.EMAIL_FROM || 'Shop <noreply@yourdomain.com>',
       to: [to],
       subject,
       html,
@@ -40,7 +40,7 @@ export function verificationEmailHtml({ name, verifyUrl }) {
   </p>
   <p style="color:#666;font-size:13px">
     If the button doesn't work, paste this link into your browser:<br>
-    <span style="word-break:break-all">${verifyUrl}</span>
+    <span style="word-break:break-all">${escapeHtml(verifyUrl)}</span>
   </p>
   <p style="color:#666;font-size:13px">If you didn't create an account, you can ignore this email.</p>
 </body></html>`;
