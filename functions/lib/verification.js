@@ -1,5 +1,6 @@
 import { generateToken, sha256Hex } from './tokens.js';
 import { sendEmail, verificationEmailHtml } from './email.js';
+
 export async function issueVerification(env, user) {
   const raw = generateToken();
   const hash = await sha256Hex(raw);
@@ -11,12 +12,15 @@ export async function issueVerification(env, user) {
                       verification_sent_at = ? WHERE id = ?`
   ).bind(hash, expiresAt, now, user.id).run();
 
-  const appUrl = env.APP_URL;
+  const appUrl = env.APP_URL || 'http://localhost:8788';
   const verifyUrl = `${appUrl}/verify-email.html?token=${encodeURIComponent(raw)}`;
+
   await sendEmail(env, {
     to: user.email,
     subject: 'Verify your email',
     html: verificationEmailHtml({ name: user.name, verifyUrl }),
     text: `Verify your email: ${verifyUrl}`,
   });
+
+  return { raw, verifyUrl };
 }
