@@ -1,4 +1,4 @@
-import { json, sha256Hex } from '../../../lib/tokens.js';
+import { json, sha256Hex } from '../../lib/tokens.js';
 
 export async function onRequest(context) {
   const { request, env } = context;
