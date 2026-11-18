@@ -1,1 +1,64 @@
-<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Seller centre — Davilanco</title><link rel="stylesheet" href="/css/style.css"><link rel="stylesheet" href="/seller/seller.css"><script defer src="/seller/seller.js"></script></head><body><header class="site-header"><a class="brand" href="/">DAVILANCO <i>SELLER</i></a><a href="/">Store ↗</a></header><main class="container page-main"><p class="eyebrow">SELLER WORKSPACE</p><h1>Your store, your growth<span class="gold">.</span></h1><p id="sellerMessage" class="form-message" role="status"></p><section class="panel"><h2>Add a product</h2><form id="sellerProductForm" class="seller-form"><input name="name" placeholder="Product name" required><input name="price" type="number" min="1" placeholder="Price NGN" required><select name="category"><option value="locally-made">Locally made</option><option value="imported">Imported</option><option value="others">Others</option></select><input name="image" type="url" placeholder="Image URL"><textarea name="description" placeholder="Description"></textarea><input name="stock" type="number" min="0" value="1"><button class="btn btn-gold">Submit product ↗</button></form></section><section class="panel"><h2>Your listings</h2><div id="sellerProducts">Loading…</div></section><section class="panel"><h2>Your orders</h2><div id="sellerOrders">Loading…</div></section></main></body></html>
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Seller centre — Davilanco</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/seller/seller.css">
+    <script defer src="/seller/seller.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+  <a class="brand" href="/">DAVILANCO <i>STORE</i></a>
+  <a href="/">← Store</a>
+  <nav class="header-actions">
+    <button id="themeToggle" class="icon-btn" aria-label="Toggle theme">☼</button>
+    <button id="menuToggle" class="icon-btn" aria-label="Open menu" aria-expanded="false">☰</button>
+  </nav>
+</header>
+
+<div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+<aside id="navDrawer" class="nav-drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <b>Menu</b>
+    <button id="menuClose" class="icon-btn" aria-label="Close menu">×</button>
+  </div>
+  <a href="/">Home</a>
+  <a href="/dashboard.html">My account</a>
+  <a id="navSeller" href="/seller/" hidden>Seller centre</a>
+  <a id="navAdmin" href="/admin/" hidden>Admin</a>
+  <a href="/categories.html">Shop</a>
+  <button id="logoutNav" class="btn btn-outline" type="button" style="margin-top:12px">Sign out</button>
+</aside>
+    <main class="container page-main">
+      <p class="eyebrow">SELLER WORKSPACE</p>
+      <h1>Your store, your growth<span class="gold">.</span></h1>
+      <p id="sellerMessage" class="form-message" role="status"></p>
+      <section class="panel">
+        <h2>Add a product</h2>
+        <form id="sellerProductForm" class="seller-form">
+          <input name="name" placeholder="Product name" required>
+          <input name="price" type="number" min="1" placeholder="Price NGN" required>
+          <select name="category">
+            <option value="locally-made">Locally made</option>
+            <option value="imported">Imported</option>
+            <option value="others">Others</option>
+          </select>
+          <input name="image" type="url" placeholder="Image URL">
+          <textarea name="description" placeholder="Description"></textarea>
+          <input name="stock" type="number" min="0" value="1">
+          <button class="btn btn-gold">Submit product ↗</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h2>Your listings</h2>
+        <div id="sellerProducts">Loading…</div>
+      </section>
+      <section class="panel">
+        <h2>Your orders</h2>
+        <div id="sellerOrders">Loading…</div>
+      </section>
+    </main>
+  </body>
+</html>
