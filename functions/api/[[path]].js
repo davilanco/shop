@@ -344,8 +344,10 @@ async function handler({ request, env }) {
       let mine = u.searchParams.get('mine') === '1' && user && ['seller', 'admin'].includes(user.role);
       let q = mine
         ? env.DB.prepare('SELECT * FROM products WHERE seller_id=? ORDER BY created_at DESC').bind(user.id)
-        : env.DB.prepare("SELECT id,name,description,price,image,category,stock,status FROM products WHERE status='active' AND stock>0 ORDER BY created_at DESC");
-      return json({ products: (await q.all()).results });
+        : user && user.role === 'admin'
+          ? env.DB.prepare('SELECT id,name,description,price,image,category,stock,status FROM products ORDER BY created_at DESC')
+          : env.DB.prepare("SELECT id,name,description,price,image,category,stock,status FROM products WHERE status='active' AND stock>0 ORDER BY created_at DESC");
+       return json({ products: (await q.all()).results });
     }
 
     if (p === 'products' && m === 'POST') {
@@ -367,7 +369,19 @@ async function handler({ request, env }) {
       await env.DB.prepare('DELETE FROM products WHERE id=?').bind(p.split('/')[1]).run();
       return json({ ok: true });
     }
-
+    
+     if (p === 'products/status' && m === 'PATCH') {
+      await requireUser(request, env, ['admin']);
+      let b = await body(request);
+      if (!b.productId || !['active', 'rejected', 'archived', 'pending'].includes(b.status)) {
+        return json({ error: 'Valid productId and status required.' }, 400);
+      }
+      await env.DB.prepare('UPDATE products SET status=? WHERE id=?')
+        .bind(b.status, b.productId)
+        .run();
+      return json({ ok: true });
+    }
+    
     if (p === 'orders' && m === 'GET') {
       let user = await requireUser(request, env, ['seller', 'admin']);
       let r =
