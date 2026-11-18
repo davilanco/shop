@@ -132,7 +132,17 @@ async function setupNavDrawerAndRole(){
 
       let p = await api('products');
       $('#adminProducts').innerHTML = (p.products || [])
-        .map((x) => '<p>' + esc(x.name) + ' · ₦' + Number(x.price).toLocaleString() + ' <button data-delete-product="' + x.id + '">Delete</button></p>')
+        .map((x) =>
+          '<p>' +
+          esc(x.name) +
+          ' · ₦' + Number(x.price).toLocaleString() +
+          ' · <b>' + esc(x.status) + '</b>' +
+          (x.status === 'pending'
+            ? ' <button data-product-status="' + esc(x.id) + '" data-status="active">Approve</button>' +
+              ' <button data-product-status="' + esc(x.id) + '" data-status="rejected">Reject</button>'
+            : '') +
+          ' <button data-delete-product="' + esc(x.id) + '">Delete</button></p>'
+        )
         .join('') || 'No products yet.';
 
       let users = await api('users');
@@ -299,6 +309,19 @@ async function setupNavDrawerAndRole(){
           body: JSON.stringify({ userId: u.dataset.saveUser, role })
         });
         load();
+      }
+      
+      let ps = e.target.closest('[data-product-status]');
+      if (ps) {
+        await api('products/status', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            productId: ps.dataset.productStatus,
+            status: ps.dataset.status
+          })
+        });
+        load();
+        return;
       }
 
       let c = e.target.closest('[data-delete-product]');
