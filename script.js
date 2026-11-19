@@ -141,11 +141,65 @@
     try {
       const data = await api('products');
       products = data.products || [];
-
       const params = new URLSearchParams(location.search);
       const category = params.get('category');
       const term = (params.get('q') || '').toLowerCase();
+      const categorySEO = {
+  'locally-made': {
+    title: 'Locally Made Products in Nigeria | Davilanco Store',
+    description: 'Shop locally made products in Nigeria at Davilanco Store. Discover quality fashion, accessories, everyday essentials and more.',
+    heading: 'Locally Made Products'
+  },
+  'imported': {
+    title: 'Imported Products in Nigeria | Davilanco Store',
+    description: 'Discover imported products at Davilanco Store. Shop fashion, electronics, accessories and everyday essentials in Nigeria.',
+    heading: 'Imported Products'
+  },
+  'others': {
+    title: 'Shop All Products | Davilanco Store',
+    description: 'Explore products across all categories at Davilanco Store. Discover locally made and imported fashion, electronics, accessories and more.',
+    heading: 'All Products'
+  }
+};
 
+const seo = categorySEO[category] || {
+  title: 'Shop Categories | Davilanco Store',
+  description: 'Explore locally made and imported products at Davilanco Store in Nigeria.',
+  heading: 'Shop Categories'
+};
+
+document.title = seo.title;
+
+const setMeta = (selector, attribute, value) => {
+  let element = document.querySelector(selector);
+
+  if (!element) {
+    element = document.createElement('meta');
+    const [key, name] = selector.match(/\[(name|property)="([^"]+)"\]/).slice(1);
+    element.setAttribute(key, name);
+    document.head.appendChild(element);
+  }
+
+  element.setAttribute('content', value);
+};
+
+setMeta('meta[name="description"]', 'content', seo.description);
+setMeta('meta[property="og:title"]', 'content', seo.title);
+setMeta('meta[property="og:description"]', 'content', seo.description);
+setMeta('meta[name="twitter:title"]', 'content', seo.title);
+setMeta('meta[name="twitter:description"]', 'content', seo.description);
+
+const canonical = document.querySelector('link[rel="canonical"]');
+if (canonical) {
+  canonical.href = category
+    ? `https://shop.davilanco.com/category.html?category=${encodeURIComponent(category)}`
+    : 'https://shop.davilanco.com/category.html';
+}
+
+const ogUrl = document.querySelector('meta[property="og:url"]');
+if (ogUrl) {
+  ogUrl.content = location.href;
+}
       if (category && category !== 'others') {
         products = products.filter((p) => p.category === category);
       }
