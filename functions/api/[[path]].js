@@ -606,13 +606,10 @@ async function handler({ request, env }) {
         format: 'json',
         v: '2.0'
       };
-      const text = Object.keys(params)
-        .filter((k) => params[k] !== undefined && params[k] !== null)
-        .sort()
-        .map((k) => k + String(typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]))
-        .join('');
-      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.ALIEXPRESS_APP_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-      const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text));
+      params.sign = await aeSyncSignature(
+  params,
+  env.ALIEXPRESS_APP_SECRET
+);
       params.sign = [...new Uint8Array(sig)].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
       const response = await fetch('https://api-sg.aliexpress.com/sync', {
         method: 'POST',
