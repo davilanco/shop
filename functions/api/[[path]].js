@@ -7,8 +7,13 @@ import {
   cookieHeader,
   clearCookie,
   requireUser,
-  body
-} from '../lib/auth.js';
+  body,
+  aeTokenRequest,
+  aeSaveTokens,
+  aeRefreshIfNeeded,
+  aeDecrypt,
+  aeSyncSignature
+} from '/../lib/auth.js';
 
 const fail = (e) =>
   json(
