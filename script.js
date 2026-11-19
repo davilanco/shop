@@ -124,6 +124,16 @@
     `;
   }
 
+
+  fetch('/api/auth/me', { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : null)
+    .then(me => {
+      if (me && !me.email_verified) {
+        document.getElementById('nav-verify').style.display = '';
+      }
+    });
+
+
   async function loadProducts() {
     const grid = $('#productGrid');
     if (!grid) return;
