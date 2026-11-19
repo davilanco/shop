@@ -220,9 +220,9 @@ if (ogUrl) {
         ? products.map(productCard).join('')
         : '<p class="muted">No products found. Check back soon.</p>';
 
-      if ($('#categoryTitle')) {
-        $('#categoryTitle').textContent = (category || 'Category').replace(/-/g, ' ');
-      }
+     if ($('#categoryTitle')) {
+  $('#categoryTitle').textContent = seo.heading;
+}
     } catch (e) {
       grid.textContent = e.message;
     }
