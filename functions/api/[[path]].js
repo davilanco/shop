@@ -610,7 +610,6 @@ async function handler({ request, env }) {
   params,
   env.ALIEXPRESS_APP_SECRET
 );
-      params.sign = [...new Uint8Array(sig)].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
       const response = await fetch('https://api-sg.aliexpress.com/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
