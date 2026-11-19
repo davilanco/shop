@@ -790,8 +790,15 @@ async function handler({ request, env }) {
         aeProductImage({ imageUrl: base?.imageUrl || base?.product_main_image_url || d?.imageUrl });
       const description = String(base?.detail || base?.mobile_detail || base?.description || 'Imported from AliExpress.').slice(0, 3000);
       const id = uid();
-      const skuList = d?.ae_item_sku_info_dtos || d?.sku_info || d?.skus || [];
-      const skuRows = Array.isArray(skuList) ? skuList : [];
+      const rawSkuList = d?.ae_item_sku_info_dtos || d?.sku_info || d?.skus || [];
+
+const skuRows = Array.isArray(rawSkuList)
+  ? rawSkuList
+  : Array.isArray(rawSkuList?.ae_item_sku_info_d_t_o)
+    ? rawSkuList.ae_item_sku_info_d_t_o
+    : Array.isArray(rawSkuList?.ae_item_sku_info_dto)
+      ? rawSkuList.ae_item_sku_info_dto
+      : [];
       await env.DB.prepare("INSERT INTO products(id,seller_id,name,description,price,image,category,stock,status) VALUES(?,?,?,?,?,?, 'imported',?, 'pending')")
         .bind(id, actor.id, title, description, sellingPrice, image, skuRows.reduce((n, s) => n + Math.max(0, Number(s.sku_available_stock || 0)), 0))
         .run();
