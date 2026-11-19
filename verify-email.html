@@ -8,58 +8,210 @@
   <style>
     body { font-family: system-ui, sans-serif; max-width: 480px;
            margin: 64px auto; padding: 0 20px; color: #111; }
-    button { background:#111; color:#fff; border:0; padding:12px 20px;
-             border-radius:6px; font-size:16px; cursor:pointer; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    .msg { margin-top:20px; }
-    .err { color:#b00020; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    p { line-height: 1.5; color: #444; }
+    form { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+    label { font-size: 14px; color: #444; }
+    input[type=email] { padding: 10px 12px; border: 1px solid #ccc;
+                         border-radius: 6px; font-size: 16px; background: #f7f7f7; }
+    button { background: #111; color: #fff; border: 0; padding: 12px 20px;
+             border-radius: 6px; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .msg { margin-top: 16px; font-size: 14px; }
+    .err { color: #b00020; }
+    .blocked { border: 1px solid #f5c2c7; background: #f8d7da; color: #842029;
+               padding: 16px; border-radius: 8px; margin-top: 20px; }
+    .blocked a { color: #842029; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>Verify your email</h1>
-  <p id="intro">Click the button below to confirm your email address.</p>
-  <button id="confirm">Confirm email</button>
-  <div id="msg" class="msg"></div>
+  <div id="root">
+    <p>Loading…</p>
+  </div>
 
   <script>
-    const token = new URLSearchParams(location.search).get('token') || '';
-    const btn = document.getElementById('confirm');
-    const msg = document.getElementById('msg');
+    const root = document.getElementById('root');
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token') || '';
 
-    if (!token) {
-      btn.disabled = true;
-      msg.textContent = 'Missing verification token.';
-      msg.className = 'msg err';
+    // ---- render helpers -------------------------------------------------
+
+    function showBlocked() {
+      root.innerHTML = `
+        <h1>Access blocked</h1>
+        <div class="blocked">
+          Please use the correct route to get here.
+        </div>
+        <p style="margin-top:20px">
+          If you received a verification email, click the link inside it.
+          Otherwise <a href="/login.html">log in</a> and use the
+          <strong>Verify email</strong> link in the navigation.
+        </p>`;
     }
 
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      msg.textContent = 'Verifying…';
-      msg.className = 'msg';
-      try {
-        const res = await fetch('/api/auth/verify-email', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.ok) {
-          msg.textContent = data.already_verified
-            ? 'Already verified. You can close this tab.'
-            : 'Email verified. You can close this tab and log in.';
-        } else if (res.status === 410 || data.error === 'expired') {
-          msg.textContent = 'This link has expired. Log in and request a new one.';
-          msg.className = 'msg err';
-        } else {
-          msg.textContent = 'Invalid or already-used link.';
+    function showAlreadyVerified(email) {
+      root.innerHTML = `
+        <h1>Email already verified</h1>
+        <p>${escapeHtml(email)} is already verified. Nothing else to do.</p>
+        <p><a href="/dashboard.html">Go to dashboard →</a></p>`;
+    }
+
+    function showConfirm(token) {
+      root.innerHTML = `
+        <h1>Confirm your email</h1>
+        <p>Click the button below to confirm this email address.</p>
+        <form id="confirm-form">
+          <button type="submit">Confirm email</button>
+        </form>
+        <div id="msg" class="msg"></div>`;
+
+      document.getElementById('confirm-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = e.target.querySelector('button');
+        const msg = document.getElementById('msg');
+        btn.disabled = true;
+        msg.textContent = 'Verifying…';
+        msg.className = 'msg';
+        try {
+          const res = await fetch('/api/auth/verify-email', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ token }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.ok) {
+            msg.textContent = data.already_verified
+              ? 'Already verified. You can close this tab.'
+              : 'Email verified. You can close this tab.';
+          } else if (res.status === 410 || data.error === 'expired') {
+            msg.textContent = 'This link has expired. Log in and resend from the dashboard.';
+            msg.className = 'msg err';
+          } else {
+            msg.textContent = 'Invalid or already-used link.';
+            msg.className = 'msg err';
+          }
+        } catch {
+          msg.textContent = 'Network error. Please try again.';
           msg.className = 'msg err';
         }
-      } catch {
-        msg.textContent = 'Network error. Please try again.';
-        msg.className = 'msg err';
+      });
+    }
+
+    function showResend(email) {
+      root.innerHTML = `
+        <h1>Verify your email</h1>
+        <p>We'll send a verification link to this address:</p>
+        <form id="resend-form">
+          <label for="email">Email address</label>
+          <input type="email" id="email" value="${escapeHtml(email)}" readonly>
+          <button type="submit">Resend verification email</button>
+        </form>
+        <div id="msg" class="msg"></div>`;
+
+      const COOLDOWN_KEY = 'verify_cooldown_until';
+      const btn = document.querySelector('#resend-form button');
+      const msg = document.getElementById('msg');
+
+      function startCooldown(seconds) {
+        const until = Date.now() + seconds * 1000;
+        localStorage.setItem(COOLDOWN_KEY, String(until));
+        const tick = () => {
+          const left = Math.ceil((until - Date.now()) / 1000);
+          if (left <= 0) {
+            clearInterval(timer);
+            localStorage.removeItem(COOLDOWN_KEY);
+            btn.disabled = false;
+            btn.textContent = 'Resend verification email';
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = `Resend in ${left}s`;
+        };
+        const timer = setInterval(tick, 1000);
+        tick();
       }
-    });
+
+      const existing = Number(localStorage.getItem(COOLDOWN_KEY) || 0);
+      if (existing > Date.now()) startCooldown(Math.ceil((existing - Date.now()) / 1000));
+
+      document.getElementById('resend-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        btn.disabled = true;
+        msg.textContent = '';
+        msg.className = 'msg';
+        try {
+          const res = await fetch('/api/auth/send-verification', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            msg.textContent = 'Verification email sent. Check your inbox.';
+            startCooldown(60);
+            return;
+          }
+          if (res.status === 429) {
+            const s = data.retry_after || 60;
+            msg.textContent = `Please wait ${s}s before requesting again.`;
+            msg.className = 'msg err';
+            startCooldown(s);
+            return;
+          }
+          if (data.error === 'already_verified') {
+            msg.textContent = 'Already verified. Reloading…';
+            setTimeout(() => location.reload(), 800);
+            return;
+          }
+          msg.textContent = 'Could not send. Try again later.';
+          msg.className = 'msg err';
+          btn.disabled = false;
+        } catch {
+          msg.textContent = 'Network error. Please try again.';
+          msg.className = 'msg err';
+          btn.disabled = false;
+        }
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+      );
+    }
+
+    // ---- routing logic --------------------------------------------------
+
+    (async () => {
+      // Mode 1: email link — token in URL. Always allowed (token = auth).
+      if (token.length >= 40) {
+        showConfirm(token);
+        return;
+      }
+
+      // No token — need a session to proceed.
+      let me = null;
+      try {
+        const r = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        if (r.ok) me = await r.json();
+      } catch { /* network error → treated as not logged in */ }
+
+      // Mode 3a: not logged in → block.
+      if (!me) {
+        showBlocked();
+        return;
+      }
+
+      // Mode 3b: logged in and already verified → block (or friendly notice).
+      if (me.email_verified) {
+        showAlreadyVerified(me.email);
+        return;
+      }
+
+      // Mode 2: logged in + unverified → resend form.
+      showResend(me.email);
+    })();
   </script>
 </body>
-  </html>
+</html>
