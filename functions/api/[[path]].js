@@ -13,7 +13,7 @@ import {
   aeRefreshIfNeeded,
   aeDecrypt,
   aeSyncSignature
-} from '/../lib/auth.js';
+} from '../lib/auth.js';
 
 const fail = (e) =>
   json(
