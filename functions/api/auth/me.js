@@ -8,7 +8,7 @@ export async function onRequestGet({ request, env }) {
   const user = await env.DB.prepare(
     `SELECT id, email, name, role, email_verified_at
        FROM users WHERE id = ?`
-  ).bind(session.userId).first();
+  ).bind(session.Id).first();
 
   if (!user) return json({ error: 'unauthorized' }, 401);
 
