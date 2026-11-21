@@ -1,5 +1,6 @@
 import { sha256Hex, generateToken, json } from '../../lib/tokens.js';
 import { sendEmail, verificationEmailHtml } from '../../lib/email.js';
+import { getSession } from '../../lib/auth.js';
 
 export async function onRequestPost({ request, env }) {
   // Adapt to your session helper — whatever your other auth endpoints use
@@ -9,7 +10,7 @@ export async function onRequestPost({ request, env }) {
   const user = await env.DB.prepare(
     `SELECT id, email, name, email_verified_at, verification_sent_at
        FROM users WHERE id = ?`
-  ).bind(session.userId).first();
+  ).bind(session.id).first();
 
   if (!user) return json({ error: 'user_not_found' }, 404);
   if (user.email_verified_at) return json({ ok: true, already_verified: true });
