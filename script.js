@@ -392,12 +392,12 @@ if (ogUrl) {
 
       try {
         const data = await api('paystack', {
-  method: 'POST',
-  body: JSON.stringify({
-    action: 'initialize',
-    customer: Object.fromEntries(new FormData(form)),
-    items: cart.map((x) => ({ productId: x.id, quantity: x.quantity })),
-  }),
+       method: 'POST',
+       body: JSON.stringify({
+       action: 'initialize',
+       customer: Object.fromEntries(new FormData(form)),
+       items: cart.map((x) => ({ productId: x.id, quantity: x.quantity })),
+      }),
 });
     
         location.href = data.authorization_url;
