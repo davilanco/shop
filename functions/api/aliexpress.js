@@ -321,6 +321,16 @@ async function handler({ request, env }) {
     const actor = await requireUser(request, env, ['admin']);
     const b = await body(request);
 
+// ALIEXPRESS TRACKING
+if (action === 'tracking' && method === 'GET') {
+  await requireUser(request, env, ['admin', 'seller']);
+
+  return json({
+    tracking: [],
+    message: 'Tracking provider not configured.'
+  });
+}
+    
     // PRODUCT SEARCH
     if (b.action === 'search') {
       const keyword = String(b.keyWord || '').trim().slice(0, 120);
