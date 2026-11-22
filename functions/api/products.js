@@ -2,7 +2,7 @@ import {
   json,
   requireUser,
   body
-} from '../../lib/auth.js';
+} from '../lib/auth.js';
 
 const uid = () => crypto.randomUUID();
 
