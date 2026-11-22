@@ -314,14 +314,7 @@ async function handler({ request, env }) {
       return json({ orders: rows.results });
     }
 
-    if (method !== 'POST') {
-      return json({ error: 'Invalid AliExpress action.' }, 404);
-    }
-
-    const actor = await requireUser(request, env, ['admin']);
-    const b = await body(request);
-
-// ALIEXPRESS TRACKING
+    // ALIEXPRESS TRACKING
 if (action === 'tracking' && method === 'GET') {
   await requireUser(request, env, ['admin', 'seller']);
 
@@ -330,6 +323,15 @@ if (action === 'tracking' && method === 'GET') {
     message: 'Tracking provider not configured.'
   });
 }
+
+    if (method !== 'POST') {
+      return json({ error: 'Invalid AliExpress action.' }, 404);
+    }
+
+    const actor = await requireUser(request, env, ['admin']);
+    const b = await body(request);
+
+
     
     // PRODUCT SEARCH
     if (b.action === 'search') {
