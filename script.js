@@ -418,10 +418,14 @@ if (ogUrl) {
       return;
     }
 
-    api('paystack/verify', {
-      method: 'POST',
-      body: JSON.stringify({ reference: ref }),
-    })
+    api('paystack', {
+    method: 'POST',
+    body: JSON.stringify({
+    action: 'verify',
+    reference: ref,
+  }),
+})
+    
       .then((data) => {
         $('#paymentTitle').textContent = 'Payment confirmed.';
         $('#paymentMessage').textContent = 'Order reference: ' + data.orderId;
