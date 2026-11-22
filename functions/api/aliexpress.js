@@ -331,7 +331,12 @@ if (action === 'tracking' && method === 'GET') {
     const actor = await requireUser(request, env, ['admin']);
     const b = await body(request);
 
-
+// ALIEXPRESS PLACE ORDER
+if (b.action === 'place-order') {
+  return json({
+    error: 'AliExpress ordering is disabled until a verified partner API and approval workflow are configured.'
+  }, 503);
+}
     
     // PRODUCT SEARCH
     if (b.action === 'search') {
