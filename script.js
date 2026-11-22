@@ -391,13 +391,15 @@ if (ogUrl) {
       message.textContent = 'Preparing secure payment…';
 
       try {
-        const data = await api('paystack/initialize', {
-          method: 'POST',
-          body: JSON.stringify({
-            customer: Object.fromEntries(new FormData(form)),
-            items: cart.map((x) => ({ productId: x.id, quantity: x.quantity })),
-          }),
-        });
+        const data = await api('paystack', {
+  method: 'POST',
+  body: JSON.stringify({
+    action: 'initialize',
+    customer: Object.fromEntries(new FormData(form)),
+    items: cart.map((x) => ({ productId: x.id, quantity: x.quantity })),
+  }),
+});
+    
         location.href = data.authorization_url;
       } catch (err) {
         message.textContent = err.message;
