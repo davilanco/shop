@@ -182,6 +182,22 @@ async function handler({ request, env }) {
     const action = url.searchParams.get('action') || '';
     const callback = url.searchParams.get('callback') === '1';
 
+    // ALIEXPRESS WEBHOOK
+if (action === 'webhook' && method === 'POST') {
+  if (!env.AE_WEBHOOK_SECRET) {
+    return json({ error: 'Webhook not configured.' }, 503);
+  }
+
+  if (
+    request.headers.get('x-davilanco-webhook-secret') !==
+    env.AE_WEBHOOK_SECRET
+  ) {
+    return json({ error: 'Unauthorized webhook.' }, 401);
+  }
+
+  return json({ received: true });
+}
+
     // OAUTH CALLBACK
     if (callback && method === 'GET') {
       const state = url.searchParams.get('state') || '';
