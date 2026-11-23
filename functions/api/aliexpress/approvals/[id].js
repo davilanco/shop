@@ -1,5 +1,5 @@
-import { json, requireUser } from '../../lib/auth.js';
-import { fail } from '../../lib/api/common.js';
+import { json, requireUser } from '../../../lib/auth.js';
+import { fail } from '../../../lib/api/common.js';
 
 export async function onRequestPatch({ request, env, params }) {
   try {
