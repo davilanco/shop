@@ -803,7 +803,9 @@ function setupTestingWarning() {
     document.getElementById('vp-later').addEventListener('click', () => hideModal(true));
     document.getElementById('vp-resend').addEventListener('click', resend);
     document.getElementById('vp-banner-open').addEventListener('click', () => showModal());
-    modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(true); });
+    modal.addEventListener('click', (e) => {
+  e.stopPropagation();
+});
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && modal.style.display === 'flex') hideModal(true);
     });
