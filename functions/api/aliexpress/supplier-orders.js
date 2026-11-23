@@ -1,19 +1,35 @@
-import { json, requireUser } from '../../lib/auth.js';
+import {
+  json,
+  requireUser
+} from '../../lib/auth.js';
+
 import { fail } from '../../lib/api/common.js';
 
-export async function onRequestGet({ request, env }) {
+export async function onRequest({ request, env }) {
   try {
+    if (request.method !== 'GET') {
+      return json({ error: 'Method not allowed.' }, 405);
+    }
+
+    // Only administrators can view supplier orders.
     await requireUser(request, env, ['admin']);
 
-    const url = new URL(request.url);
-    const status = url.searchParams.get('status') || null;
-    const limit = Math.min(Number(url.searchParams.get('limit') || '50'), 200);
+    const rows = await env.DB.prepare(
+      `SELECT
+         so.*,
+         o.order_number,
+         o.total AS local_total,
+         o.payment_status AS local_payment_status
+       FROM aliexpress_supplier_orders so
+       JOIN orders o ON o.id = so.local_order_id
+       ORDER BY so.created_at DESC
+       LIMIT 100`
+    ).all();
 
-    // ── PASTE THE EXISTING "supplier-orders" BRANCH LOGIC HERE ──
-    // Typical shape: SELECT from orders / aliexpress_supplier_orders,
-    // LEFT JOIN products, filter by status if provided.
+    return json({
+      orders: rows.results
+    });
 
-    return json({ error: 'supplier-orders handler not implemented' }, 501);
   } catch (e) {
     return fail(e);
   }
