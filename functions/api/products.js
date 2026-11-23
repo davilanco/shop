@@ -17,8 +17,9 @@ async function handler({ request, env }) {
     const path = url.pathname.replace(/^\/api\/products\/?/, '');
     const method = request.method;
 
-    // GET /api/products
-    // GET /api/products?mine=1
+    // ==========================================
+    // GET PRODUCTS
+    // ==========================================
     if (!path && method === 'GET') {
       let user = null;
 
@@ -47,12 +48,12 @@ async function handler({ request, env }) {
 
       const result = await query.all();
 
-      return json({
-        products: result.results
-      });
+      return json({ products: result.results });
     }
 
-    // POST /api/products
+    // ==========================================
+    // CREATE PRODUCT
+    // ==========================================
     if (!path && method === 'POST') {
       const user = await requireUser(
         request,
@@ -73,8 +74,6 @@ async function handler({ request, env }) {
 
       const id = uid();
 
-      // Seller products require admin approval.
-      // Admin-created products are immediately active.
       const status =
         user.role === 'admin' ? 'active' : 'pending';
 
@@ -88,20 +87,13 @@ async function handler({ request, env }) {
 
       const stock = Math.max(
         0,
-        Number(data.stock) || 0
+        Math.floor(Number(data.stock) || 0)
       );
 
       await env.DB.prepare(
         `INSERT INTO products(
-          id,
-          seller_id,
-          name,
-          description,
-          price,
-          image,
-          category,
-          stock,
-          status
+          id, seller_id, name, description,
+          price, image, category, stock, status
         ) VALUES(?,?,?,?,?,?,?,?,?)`
       )
         .bind(
@@ -124,7 +116,304 @@ async function handler({ request, env }) {
       }, 201);
     }
 
-    // PATCH /api/products/status
+    // ==========================================
+    // ADMIN: DIRECT STOCK ADJUSTMENT
+    // PATCH /api/products/stock
+    // ==========================================
+    if (path === 'stock' && method === 'PATCH') {
+      await requireUser(request, env, ['admin']);
+
+      const data = await body(request);
+
+      const productId = String(data.productId || '');
+      const adjustment = data.adjustment;
+      const quantity = Number(data.quantity);
+
+      if (
+        !productId ||
+        !['increase', 'reduce', 'set'].includes(adjustment) ||
+        !Number.isSafeInteger(quantity) ||
+        quantity < 0 ||
+        quantity > 100000000
+      ) {
+        return json({
+          error: 'Provide a valid product, adjustment and quantity.'
+        }, 400);
+      }
+
+      const product = await env.DB.prepare(
+        'SELECT id, stock FROM products WHERE id=?'
+      ).bind(productId).first();
+
+      if (!product) {
+        return json({ error: 'Product not found.' }, 404);
+      }
+
+      let newStock;
+
+      if (adjustment === 'increase') {
+        newStock = product.stock + quantity;
+      } else if (adjustment === 'reduce') {
+        newStock = product.stock - quantity;
+      } else {
+        newStock = quantity;
+      }
+
+      if (
+        !Number.isSafeInteger(newStock) ||
+        newStock < 0 ||
+        newStock > 100000000
+      ) {
+        return json({
+          error: 'Stock adjustment would produce an invalid stock quantity.'
+        }, 400);
+      }
+
+      await env.DB.prepare(
+        'UPDATE products SET stock=? WHERE id=?'
+      ).bind(newStock, productId).run();
+
+      return json({
+        ok: true,
+        previousStock: product.stock,
+        stock: newStock
+      });
+    }
+
+    // ==========================================
+    // SELLER: REQUEST STOCK ADJUSTMENT
+    // POST /api/products/stock-request
+    // ==========================================
+    if (path === 'stock-request' && method === 'POST') {
+      const user = await requireUser(
+        request,
+        env,
+        ['seller']
+      );
+
+      const data = await body(request);
+
+      const productId = String(data.productId || '');
+      const adjustment = data.adjustment;
+      const quantity = Number(data.quantity);
+      const reason = String(data.reason || '').trim();
+
+      if (
+        !productId ||
+        !['increase', 'reduce'].includes(adjustment) ||
+        !Number.isSafeInteger(quantity) ||
+        quantity < 1 ||
+        quantity > 100000000 ||
+        reason.length < 3 ||
+        reason.length > 500
+      ) {
+        return json({
+          error: 'Provide a valid product, adjustment, quantity and reason.'
+        }, 400);
+      }
+
+      const product = await env.DB.prepare(
+        'SELECT id, name, stock FROM products WHERE id=? AND seller_id=?'
+      ).bind(productId, user.id).first();
+
+      if (!product) {
+        return json({
+          error: 'Product not found in your store.'
+        }, 404);
+      }
+
+      if (product.stock <= 0 && adjustment === 'reduce') {
+        return json({
+          error: 'This product has no stock available to reduce.'
+        }, 400);
+      }
+
+      const pending = await env.DB.prepare(
+        `SELECT id FROM stock_requests
+         WHERE product_id=? AND status='pending'
+         LIMIT 1`
+      ).bind(productId).first();
+
+      if (pending) {
+        return json({
+          error: 'A pending stock request already exists for this product.'
+        }, 409);
+      }
+
+      const id = uid();
+
+      await env.DB.prepare(
+        `INSERT INTO stock_requests(
+          id, product_id, seller_id,
+          adjustment_type, quantity, reason
+        ) VALUES(?,?,?,?,?,?)`
+      )
+        .bind(
+          id,
+          productId,
+          user.id,
+          adjustment,
+          quantity,
+          reason
+        )
+        .run();
+
+      return json({
+        ok: true,
+        requestId: id,
+        status: 'pending'
+      }, 201);
+    }
+
+    // ==========================================
+    // VIEW STOCK REQUESTS
+    // GET /api/products/stock-requests
+    // ==========================================
+    if (path === 'stock-requests' && method === 'GET') {
+      const user = await requireUser(
+        request,
+        env,
+        ['admin', 'seller']
+      );
+
+      const result = user.role === 'admin'
+        ? await env.DB.prepare(`
+            SELECT
+              sr.*,
+              p.name AS product_name,
+              p.stock AS current_stock,
+              u.name AS seller_name
+            FROM stock_requests sr
+            JOIN products p ON p.id = sr.product_id
+            JOIN users u ON u.id = sr.seller_id
+            ORDER BY
+              CASE WHEN sr.status='pending' THEN 0 ELSE 1 END,
+              sr.created_at DESC
+          `).all()
+
+        : await env.DB.prepare(`
+            SELECT
+              sr.*,
+              p.name AS product_name,
+              p.stock AS current_stock
+            FROM stock_requests sr
+            JOIN products p ON p.id = sr.product_id
+            WHERE sr.seller_id=?
+            ORDER BY sr.created_at DESC
+          `).bind(user.id).all();
+
+      return json({
+        requests: result.results
+      });
+    }
+
+    // ==========================================
+    // ADMIN: APPROVE OR REJECT STOCK REQUEST
+    // PATCH /api/products/stock-requests
+    // ==========================================
+    if (path === 'stock-requests' && method === 'PATCH') {
+      const admin = await requireUser(
+        request,
+        env,
+        ['admin']
+      );
+
+      const data = await body(request);
+
+      const requestId = String(data.requestId || '');
+      const decision = data.decision;
+
+      if (
+        !requestId ||
+        !['approve', 'reject'].includes(decision)
+      ) {
+        return json({
+          error: 'Provide a valid request ID and decision.'
+        }, 400);
+      }
+
+      const stockRequest = await env.DB.prepare(`
+        SELECT
+          id, product_id, adjustment_type, quantity, status
+        FROM stock_requests
+        WHERE id=?
+      `).bind(requestId).first();
+
+      if (!stockRequest) {
+        return json({
+          error: 'Stock request not found.'
+        }, 404);
+      }
+
+      if (stockRequest.status !== 'pending') {
+        return json({
+          error: 'This request has already been reviewed.'
+        }, 409);
+      }
+
+      if (decision === 'reject') {
+        await env.DB.prepare(`
+          UPDATE stock_requests
+          SET status='rejected',
+              reviewed_by=?,
+              reviewed_at=CURRENT_TIMESTAMP
+          WHERE id=? AND status='pending'
+        `).bind(admin.id, requestId).run();
+
+        return json({
+          ok: true,
+          status: 'rejected'
+        });
+      }
+
+      // Atomically adjust stock and approve request.
+      const operator =
+        stockRequest.adjustment_type === 'increase'
+          ? '+'
+          : '-';
+
+      const update = await env.DB.prepare(`
+        UPDATE products
+        SET stock = stock ${operator} ?
+        WHERE id = ?
+          AND stock ${operator} ? >= 0
+      `)
+        .bind(
+          stockRequest.quantity,
+          stockRequest.product_id,
+          stockRequest.quantity
+        )
+        .run();
+
+      if (!update.meta?.changes) {
+        return json({
+          error: 'Stock cannot be reduced below zero, or the product no longer exists.'
+        }, 409);
+      }
+
+      const reviewed = await env.DB.prepare(`
+        UPDATE stock_requests
+        SET status='approved',
+            reviewed_by=?,
+            reviewed_at=CURRENT_TIMESTAMP
+        WHERE id=? AND status='pending'
+      `).bind(admin.id, requestId).run();
+
+      if (!reviewed.meta?.changes) {
+        return json({
+          error: 'Request was already reviewed. Please refresh.'
+        }, 409);
+      }
+
+      return json({
+        ok: true,
+        status: 'approved'
+      });
+    }
+
+    // ==========================================
+    // ADMIN: CHANGE PRODUCT STATUS
+    // ==========================================
     if (path === 'status' && method === 'PATCH') {
       await requireUser(request, env, ['admin']);
 
@@ -139,18 +428,22 @@ async function handler({ request, env }) {
         }, 400);
       }
 
-      await env.DB.prepare(
+      const result = await env.DB.prepare(
         'UPDATE products SET status=? WHERE id=?'
       )
         .bind(data.status, data.productId)
         .run();
 
-      return json({
-        ok: true
-      });
+      if (!result.meta?.changes) {
+        return json({ error: 'Product not found.' }, 404);
+      }
+
+      return json({ ok: true });
     }
 
-    // DELETE /api/products/:id
+    // ==========================================
+    // ADMIN: DELETE PRODUCT
+    // ==========================================
     if (path && method === 'DELETE') {
       await requireUser(request, env, ['admin']);
 
@@ -162,9 +455,7 @@ async function handler({ request, env }) {
         .bind(productId)
         .run();
 
-      return json({
-        ok: true
-      });
+      return json({ ok: true });
     }
 
     return json({
@@ -172,6 +463,8 @@ async function handler({ request, env }) {
     }, 404);
 
   } catch (error) {
+    console.error('Products API error:', error);
+
     return json({
       error: error.message || 'Request failed'
     }, error.status || 500);
