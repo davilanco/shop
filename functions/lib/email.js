@@ -10,7 +10,7 @@ export async function sendEmail(env, { to, subject, html, text }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: env.EMAIL_FROM || 'Shop <noreply@yourdomain.com>',
+      from: env.EMAIL_FROM || 'Davilanco Store <noreply@shop.davilanco.com>',
       to: [to],
       subject,
       html,
