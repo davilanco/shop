@@ -138,13 +138,14 @@ async function setupNavDrawerAndRole(){
           ' · ₦' + Number(x.price).toLocaleString() +
           ' · Stock: <b>' + Number(x.stock || 0) + '</b>' +
           '<br><div class="stock-editor" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">' +
-          '<select data-stock-action="' + esc(x.id) + '">' +
-          '<option value="set">Set stock</option>' +
-          '<option value="increase">Increase</option>' +
-      '<option value="reduce">Reduce</option>' +
-       '</select>' +
-      '<input type="number" min="0" max="100000000" step="1" placeholder="Quantity" data-stock-quantity="' + esc(x.id) + '" style="width:110px">' +
-      '<button type="button" data-save-stock="' + esc(x.id) + '">Save stock</button>' +
+
+           '<select data-stock-action="' + x.id + '">' +
+  '<option value="set">Set stock</option>' +
+  '<option value="increase">Increase</option>' +
+  '<option value="reduce">Reduce</option>' +
+'</select>' +
+'<input data-stock-quantity="' + x.id + '" type="number" min="1">' +
+'<button data-save-stock="' + x.id + '">Save stock</button>' +
      '</div>' +
 ' · <b>' + esc(x.status) + '</b>' +
            (x.status === 'pending'
