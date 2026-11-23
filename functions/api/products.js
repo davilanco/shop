@@ -446,6 +446,7 @@ return json({
   ok: true,
   status: 'approved'
 });
+    }
 
     // ==========================================
     // ADMIN: CHANGE PRODUCT STATUS
