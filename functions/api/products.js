@@ -366,50 +366,86 @@ async function handler({ request, env }) {
         });
       }
 
-      // Atomically adjust stock and approve request.
-      const operator =
-        stockRequest.adjustment_type === 'increase'
-          ? '+'
-          : '-';
+      // Approve request and adjust stock in one D1 batch.
+const results = await env.DB.batch([
+  env.DB.prepare(`
+    UPDATE stock_requests
+    SET status='approved',
+        reviewed_by=?,
+        reviewed_at=CURRENT_TIMESTAMP
+    WHERE id=?
+      AND status='pending'
+      AND EXISTS (
+        SELECT 1
+        FROM products p
+        WHERE p.id = stock_requests.product_id
+          AND (
+            (
+              stock_requests.adjustment_type='increase'
+              AND p.stock <= 100000000 - stock_requests.quantity
+            )
+            OR
+            (
+              stock_requests.adjustment_type='reduce'
+              AND p.stock >= stock_requests.quantity
+            )
+          )
+      )
+  `).bind(admin.id, requestId),
 
-      const update = await env.DB.prepare(`
-        UPDATE products
-        SET stock = stock ${operator} ?
-        WHERE id = ?
-          AND stock ${operator} ? >= 0
-      `)
-        .bind(
-          stockRequest.quantity,
-          stockRequest.product_id,
-          stockRequest.quantity
-        )
-        .run();
+  env.DB.prepare(`
+    UPDATE products
+    SET stock = CASE
+      WHEN (
+        SELECT adjustment_type
+        FROM stock_requests
+        WHERE id=? AND status='approved'
+      ) = 'increase'
+      THEN stock + (
+        SELECT quantity
+        FROM stock_requests
+        WHERE id=? AND status='approved'
+      )
+      ELSE stock - (
+        SELECT quantity
+        FROM stock_requests
+        WHERE id=? AND status='approved'
+      )
+    END
+    WHERE id=?
+      AND EXISTS (
+        SELECT 1
+        FROM stock_requests
+        WHERE id=?
+          AND status='approved'
+          AND reviewed_by=?
+      )
+  `).bind(
+    requestId,
+    requestId,
+    requestId,
+    stockRequest.product_id,
+    requestId,
+    admin.id
+  )
+]);
 
-      if (!update.meta?.changes) {
-        return json({
-          error: 'Stock cannot be reduced below zero, or the product no longer exists.'
-        }, 409);
-      }
+if (!results[0].meta?.changes) {
+  return json({
+    error: 'Request is no longer pending, or the stock adjustment is invalid.'
+  }, 409);
+}
 
-      const reviewed = await env.DB.prepare(`
-        UPDATE stock_requests
-        SET status='approved',
-            reviewed_by=?,
-            reviewed_at=CURRENT_TIMESTAMP
-        WHERE id=? AND status='pending'
-      `).bind(admin.id, requestId).run();
+if (!results[1].meta?.changes) {
+  return json({
+    error: 'Stock update failed. Please refresh and check the request.'
+  }, 409);
+}
 
-      if (!reviewed.meta?.changes) {
-        return json({
-          error: 'Request was already reviewed. Please refresh.'
-        }, 409);
-      }
-
-      return json({
-        ok: true,
-        status: 'approved'
-      });
-    }
+return json({
+  ok: true,
+  status: 'approved'
+});
 
     // ==========================================
     // ADMIN: CHANGE PRODUCT STATUS
