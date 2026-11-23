@@ -136,7 +136,8 @@ async function setupNavDrawerAndRole(){
           '<p>' +
           esc(x.name) +
           ' · ₦' + Number(x.price).toLocaleString() +
-          ' · <b>' + esc(x.status) + '</b>' +
+         ' · Stock: <b>' + Number(x.stock || 0) + '</b>' +
+         ' · <b>' + esc(x.status) + '</b>' +
           (x.status === 'pending'
             ? ' <button data-product-status="' + esc(x.id) + '" data-status="active">Approve</button>' +
               ' <button data-product-status="' + esc(x.id) + '" data-status="rejected">Reject</button>'
