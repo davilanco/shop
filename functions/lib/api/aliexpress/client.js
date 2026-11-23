@@ -1,7 +1,7 @@
 import {
   aeRefreshIfNeeded,
   aeDecrypt
-} from './auth.js';
+} from '../auth.js';
 
 export async function aeSyncCall(method, business, env) {
   if (!env.ALIEXPRESS_APP_KEY || !env.ALIEXPRESS_APP_SECRET) {
