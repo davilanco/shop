@@ -136,9 +136,18 @@ async function setupNavDrawerAndRole(){
           '<p>' +
           esc(x.name) +
           ' · ₦' + Number(x.price).toLocaleString() +
-         ' · Stock: <b>' + Number(x.stock || 0) + '</b>' +
-         ' · <b>' + esc(x.status) + '</b>' +
-          (x.status === 'pending'
+          ' · Stock: <b>' + Number(x.stock || 0) + '</b>' +
+          '<br><div class="stock-editor" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">' +
+          '<select data-stock-action="' + esc(x.id) + '">' +
+          '<option value="set">Set stock</option>' +
+          '<option value="increase">Increase</option>' +
+      '<option value="reduce">Reduce</option>' +
+       '</select>' +
+      '<input type="number" min="0" max="100000000" step="1" placeholder="Quantity" data-stock-quantity="' + esc(x.id) + '" style="width:110px">' +
+      '<button type="button" data-save-stock="' + esc(x.id) + '">Save stock</button>' +
+     '</div>' +
+' · <b>' + esc(x.status) + '</b>' +
+           (x.status === 'pending'
             ? ' <button data-product-status="' + esc(x.id) + '" data-status="active">Approve</button>' +
               ' <button data-product-status="' + esc(x.id) + '" data-status="rejected">Reject</button>'
             : '') +
