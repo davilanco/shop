@@ -320,6 +320,47 @@ async function setupNavDrawerAndRole(){
         });
         load();
       }
+
+            let stockSave = e.target.closest('[data-save-stock]');
+      if (stockSave) {
+        const productId = stockSave.dataset.saveStock;
+        const adjustment = document.querySelector(
+          '[data-stock-action="' + productId + '"]'
+        ).value;
+
+        const quantityInput = document.querySelector(
+          '[data-stock-quantity="' + productId + '"]'
+        );
+
+        const quantity = Number(quantityInput.value);
+        const min = adjustment === 'set' ? 0 : 1;
+
+        if (
+          quantityInput.value.trim() === '' ||
+          !Number.isSafeInteger(quantity) ||
+          quantity < min ||
+          quantity > 100000000
+        ) {
+          throw Error(
+            adjustment === 'set'
+              ? 'Enter a valid stock quantity.'
+              : 'Enter a whole-number adjustment greater than zero.'
+          );
+        }
+
+        await api('products/stock', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            productId,
+            adjustment,
+            quantity
+          })
+        });
+
+        $('#adminMessage').textContent = 'Stock updated successfully.';
+        await load();
+        return;
+      }
       
       let ps = e.target.closest('[data-product-status]');
       if (ps) {
