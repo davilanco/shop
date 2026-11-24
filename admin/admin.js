@@ -1,218 +1,780 @@
-  async function load() {
-    // Each section loads independently.
-    // A failure in one section will not stop the others.
+(() => {
+  'use strict';
 
-    async function loadSection(elementId, sectionName, callback) {
-      const element = $('#' + elementId);
-      if (!element) return;
+  const $ = (selector) => document.querySelector(selector);
 
-      element.textContent = 'Loading…';
+  const esc = (value) => String(value ?? '').replace(
+    /[&<>"']/g,
+    (character) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    })[character]
+  );
 
-      try {
-        await callback();
-      } catch (error) {
-        console.error(sectionName + ' loading failed:', error);
-        element.textContent =
-          sectionName + ' could not load: ' +
-          (error.message || 'Unknown error.');
+  const money = (value) =>
+    '₦' + Number(value || 0).toLocaleString();
+
+  async function api(endpoint, options = {}) {
+    const response = await fetch('/api/' + endpoint.replace(/^\/+/, ''), {
+      credentials: 'same-origin',
+      ...options,
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.headers || {})
       }
+    });
+
+    let data;
+
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('The server returned an unreadable response.');
     }
 
-    const tasks = [];
+    if (!response.ok) {
+      throw new Error(data.error || 'Request failed.');
+    }
 
-    // AliExpress connection status
-    tasks.push(loadSection(
-      'aeConnectionStatus',
-      'AliExpress connection',
-      async () => {
-        const ae = await api('aliexpress/status');
+    return data;
+  }
 
-        $('#aeConnectionStatus').textContent = ae.connected
-          ? 'Connected · access token expires ' +
-            (ae.access_expires_at || 'unknown')
-          : 'Not connected';
-      }
-    ));
+  const post = (endpoint, data) => api(endpoint, {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
 
-    // AliExpress supplier orders
-    tasks.push(loadSection(
-      'aeSupplierOrders',
-      'AliExpress supplier approvals',
-      async () => {
-        await loadAeSupplierOrders();
-      }
-    ));
+  const patch = (endpoint, data) => api(endpoint, {
+    method: 'PATCH',
+    body: JSON.stringify(data)
+  });
 
-    // Analytics
-    tasks.push(loadSection(
-      'adminStats',
-      'Analytics',
-      async () => {
-        const d = await api('analytics');
+  function message(text, isError = false) {
+    const element = $('#adminMessage');
+    if (!element) return;
 
-        $('#adminStats').innerHTML = Object.entries(d.stats || {})
-          .map(([k, v]) =>
-            '<div class="admin-stat"><b>' +
-            Number(v).toLocaleString() +
-            '</b><span>' +
-            esc(k.replace(/_/g, ' ')) +
-            '</span></div>'
-          )
-          .join('') || 'No statistics available.';
-      }
-    ));
+    element.textContent = text;
+    element.classList.toggle('error', isError);
+  }
 
-    // Orders
-    tasks.push(loadSection(
-      'adminOrders',
-      'Orders',
-      async () => {
-        const o = await api('orders');
+  function setMessage(element, text, isError = false) {
+    if (!element) return;
 
-        $('#adminOrders').innerHTML =
-          '<table class="admin-table"><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th><th>Update</th></tr>' +
-          (o.orders || []).map((x) =>
-            '<tr><td>' + esc(x.order_number) +
-            '</td><td>' + esc(x.customer_email) +
-            '</td><td>₦' + Number(x.total).toLocaleString() +
-            '</td><td>' + esc(x.status) +
-            '</td><td>' +
-            '<select data-order="' + x.id + '">' +
-            '<option>pending</option><option>approved</option>' +
-            '<option>shipping</option><option>delivered</option>' +
-            '<option>cancelled</option></select>' +
-            '<button data-save-order="' + x.id + '">Save</button>' +
-            (x.payment_status === 'paid'
-              ? '<button data-ae-prepare="' + x.id +
-                '">Queue supplier review</button>'
-              : '') +
-            '</td></tr>'
-          ).join('') +
-          '</table>' || 'No orders found.';
-      }
-    ));
+    element.textContent = text;
+    element.style.color = isError ? '#e05252' : '';
+  }
 
-    // Seller applications
-    tasks.push(loadSection(
-      'sellerApplications',
-      'Seller applications',
-      async () => {
-        const a = await api('seller/applications');
+  async function requireAdmin() {
+    const result = await api('auth/me');
 
-        $('#sellerApplications').innerHTML =
-          (a.applications || []).map((x) =>
-            '<p>' + esc(x.business_name) +
-            ' — ' + esc(x.user_email) +
-            ' <button data-application="' + x.id +
-            '" data-status="approved">Approve</button>' +
-            ' <button data-application="' + x.id +
-            '" data-status="rejected">Reject</button></p>'
-          ).join('') || 'No pending applications.';
-      }
-    ));
+    if (result.role !== 'admin') {
+      location.replace('/login.html');
+      return false;
+    }
 
-    // Products
-    tasks.push(loadSection(
-      'adminProducts',
-      'Products',
-      async () => {
-        const p = await api('products');
+    return true;
+  }
 
-        $('#adminProducts').innerHTML =
-          (p.products || []).map((x) =>
-            '<p>' +
-            esc(x.name) +
-            ' · ₦' + Number(x.price).toLocaleString() +
-            ' · Stock: <b>' + Number(x.stock || 0) + '</b>' +
+  async function logout() {
+    try {
+      await post('auth/logout', {});
+    } finally {
+      location.replace('/login.html');
+    }
+  }
 
-            '<br><div class="stock-editor" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">' +
+  async function loadSection(elementId, sectionName, callback) {
+    const element = $('#' + elementId);
+    if (!element) return;
 
-            '<select data-stock-action="' + x.id + '">' +
-            '<option value="set">Set stock</option>' +
-            '<option value="increase">Increase</option>' +
-            '<option value="reduce">Reduce</option>' +
-            '</select>' +
+    element.textContent = 'Loading…';
 
-            '<input data-stock-quantity="' + x.id +
-            '" type="number" min="1">' +
+    try {
+      await callback();
+    } catch (error) {
+      console.error(sectionName + ' loading failed:', error);
+      element.textContent =
+        sectionName + ' could not load: ' +
+        (error.message || 'Unknown error.');
+    }
+  }
 
-            '<button data-save-stock="' + x.id +
-            '">Save stock</button>' +
+  // ==========================================
+  // ANALYTICS
+  // ==========================================
 
-            '</div>' +
+  async function loadAnalytics() {
+    const data = await api('analytics');
 
-            ' · <b>' + esc(x.status) + '</b>' +
+    $('#adminStats').innerHTML = Object.entries(data.stats || {})
+      .map(([key, value]) =>
+        '<div class="admin-stat">' +
+          '<b>' + Number(value).toLocaleString() + '</b>' +
+          '<span>' + esc(key.replace(/_/g, ' ')) + '</span>' +
+        '</div>'
+      )
+      .join('') || 'No statistics available.';
+  }
 
-            (x.status === 'pending'
-              ? ' <button data-product-status="' + esc(x.id) +
-                '" data-status="active">Approve</button>' +
-                ' <button data-product-status="' + esc(x.id) +
-                '" data-status="rejected">Reject</button>'
-              : '') +
+  // ==========================================
+  // ALIEXPRESS CONNECTION
+  // ==========================================
 
-            ' <button data-delete-product="' +
-            esc(x.id) + '">Delete</button></p>'
-          ).join('') || 'No products yet.';
-      }
-    ));
+  async function loadAeConnection() {
+    const data = await api('aliexpress/status');
 
-    // Users
-    tasks.push(loadSection(
-      'adminUsers',
-      'Users',
-      async () => {
-        const users = await api('users');
+    $('#aeConnectionStatus').textContent = data.connected
+      ? 'Connected · access token expires ' +
+        (data.access_expires_at || 'unknown')
+      : 'Not connected';
+  }
 
-        $('#adminUsers').innerHTML =
-          '<table class="admin-table"><tr><th>Name</th><th>Email</th><th>Role</th><th>Change role</th></tr>' +
-          (users.users || []).map((x) =>
-            '<tr><td>' + esc(x.name) +
-            '</td><td>' + esc(x.email) +
-            '</td><td>' + esc(x.role) +
-            '</td><td>' +
+  // ==========================================
+  // ALIEXPRESS SUPPLIER ORDERS
+  // ==========================================
 
-            '<select data-user-role="' + x.id + '">' +
-            '<option value="customer" ' +
-            (x.role === 'customer' ? 'selected' : '') +
-            '>Customer</option>' +
+  async function loadAeSupplierOrders() {
+    const data = await api('aliexpress/supplier-orders');
+    const orders = data.orders || [];
 
-            '<option value="seller" ' +
-            (x.role === 'seller' ? 'selected' : '') +
-            '>Seller</option>' +
+    $('#aeSupplierOrders').innerHTML = orders.map((order) => {
+      const awaiting = order.status === 'awaiting_admin_approval';
+      const approved = order.status === 'approved_for_submission';
+      const paymentNotRequested = order.payment_status === 'not_requested';
 
-            '<option value="admin" ' +
-            (x.role === 'admin' ? 'selected' : '') +
-            '>Admin</option>' +
+      return `
+        <article class="message-item">
+          <b>Supplier review: ${esc(order.out_order_id || order.id)}</b>
+          <p>Local order: ${esc(order.order_number || order.local_order_id)}</p>
+          <p>Order total: ${money(order.total)}</p>
+          <p>Order status: <b>${esc(order.status)}</b></p>
+          <p>Payment status: <b>${esc(order.payment_status)}</b></p>
 
-            '</select>' +
+          ${
+            awaiting
+              ? `
+                <button
+                  type="button"
+                  data-supplier-decision="${esc(order.id)}"
+                  data-decision="approve">
+                  Approve order review
+                </button>
 
-            '<button data-save-user="' + x.id +
-            '">Save</button></td></tr>'
-          ).join('') +
-          '</table>' || 'No users found.';
-      }
-    ));
+                <button
+                  type="button"
+                  data-supplier-decision="${esc(order.id)}"
+                  data-decision="reject">
+                  Reject
+                </button>
+              `
+              : ''
+          }
 
-    // Customer messages
-    tasks.push(loadSection(
-      'adminMessages',
-      'Customer messages',
-      async () => {
-        const messages = await api('messages');
+          ${
+            approved && paymentNotRequested
+              ? `
+                <button
+                  type="button"
+                  data-supplier-decision="${esc(order.id)}"
+                  data-decision="approve_payment">
+                  Approve supplier payment separately
+                </button>
+              `
+              : ''
+          }
+        </article>
+      `;
+    }).join('') || 'No supplier orders awaiting review.';
+  }
 
-        $('#adminMessages').innerHTML =
-          (messages.messages || []).map((x) =>
-            '<article class="message-item">' +
-            '<b>' + esc(x.name) + ' · ' +
-            esc(x.email) + '</b>' +
-            '<p>' + esc(x.body) + '</p>' +
-            '<small>' + esc(x.created_at) + '</small>' +
-            '</article>'
-          ).join('') || 'No customer messages.';
-      }
-    ));
+  // ==========================================
+  // ORDERS
+  // ==========================================
 
-    // Wait for all sections without allowing one failure
-    // to interrupt another.
+  async function loadOrders() {
+    const data = await api('orders');
+
+    $('#adminOrders').innerHTML =
+      '<table class="admin-table">' +
+        '<tr>' +
+          '<th>Order</th>' +
+          '<th>Customer</th>' +
+          '<th>Total</th>' +
+          '<th>Payment</th>' +
+          '<th>Status</th>' +
+          '<th>Update</th>' +
+        '</tr>' +
+
+        (data.orders || []).map((order) => `
+          <tr>
+            <td>${esc(order.order_number)}</td>
+            <td>${esc(order.customer_email)}</td>
+            <td>${money(order.total)}</td>
+            <td>${esc(order.payment_status)}</td>
+            <td>${esc(order.status)}</td>
+            <td>
+              <select data-order-status="${esc(order.id)}">
+                <option value="pending" ${order.status === 'pending' ? 'selected' : ''}>Pending</option>
+                <option value="approved" ${order.status === 'approved' ? 'selected' : ''}>Approved</option>
+                <option value="shipping" ${order.status === 'shipping' ? 'selected' : ''}>Shipping</option>
+                <option value="delivered" ${order.status === 'delivered' ? 'selected' : ''}>Delivered</option>
+                <option value="cancelled" ${order.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+              </select>
+
+              <button type="button" data-save-order="${esc(order.id)}">
+                Save
+              </button>
+
+              ${
+                order.payment_status === 'paid'
+                  ? `
+                    <button type="button" data-ae-prepare="${esc(order.id)}">
+                      Queue supplier review
+                    </button>
+                  `
+                  : ''
+              }
+            </td>
+          </tr>
+        `).join('') +
+      '</table>' ||
+      'No orders found.';
+  }
+
+  // ==========================================
+  // SELLER APPLICATIONS
+  // ==========================================
+
+  async function loadSellerApplications() {
+    const data = await api('seller/applications');
+
+    $('#sellerApplications').innerHTML =
+      (data.applications || []).map((application) => `
+        <article class="message-item">
+          <b>${esc(application.business_name)}</b>
+          <p>Applicant: ${esc(application.user_name)}</p>
+          <p>Email: ${esc(application.user_email)}</p>
+          <p>Details: ${esc(application.details)}</p>
+          <p>Status: ${esc(application.status)}</p>
+
+          ${
+            application.document_url
+              ? `<p><a href="${esc(application.document_url)}" target="_blank" rel="noopener noreferrer">View submitted document</a></p>`
+              : ''
+          }
+
+          ${
+            application.status === 'pending'
+              ? `
+                <button
+                  type="button"
+                  data-application="${esc(application.id)}"
+                  data-status="approved">
+                  Approve
+                </button>
+
+                <button
+                  type="button"
+                  data-application="${esc(application.id)}"
+                  data-status="rejected">
+                  Reject
+                </button>
+              `
+              : ''
+          }
+        </article>
+      `).join('') || 'No seller applications found.';
+  }
+
+  // ==========================================
+  // PRODUCTS
+  // ==========================================
+
+  async function loadProducts() {
+    const data = await api('products');
+
+    $('#adminProducts').innerHTML =
+      (data.products || []).map((product) => `
+        <article class="message-item">
+          <b>${esc(product.name)}</b>
+          <p>${money(product.price)} · Stock: ${Number(product.stock || 0)}</p>
+          <p>Status: <b>${esc(product.status)}</b></p>
+
+          <div class="stock-editor" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
+            <select data-stock-action="${esc(product.id)}">
+              <option value="set">Set stock</option>
+              <option value="increase">Increase</option>
+              <option value="reduce">Reduce</option>
+            </select>
+
+            <input
+              data-stock-quantity="${esc(product.id)}"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="Quantity"
+            >
+
+            <button type="button" data-save-stock="${esc(product.id)}">
+              Save stock
+            </button>
+          </div>
+
+          ${
+            product.status === 'pending'
+              ? `
+                <button
+                  type="button"
+                  data-product-status="${esc(product.id)}"
+                  data-status="active">
+                  Approve
+                </button>
+
+                <button
+                  type="button"
+                  data-product-status="${esc(product.id)}"
+                  data-status="rejected">
+                  Reject
+                </button>
+              `
+              : ''
+          }
+
+          <button
+            type="button"
+            data-delete-product="${esc(product.id)}">
+            Delete product
+          </button>
+        </article>
+      `).join('') || 'No products found.';
+  }
+
+  // ==========================================
+  // USERS
+  // ==========================================
+
+  async function loadUsers() {
+    const data = await api('users');
+
+    $('#adminUsers').innerHTML =
+      '<table class="admin-table">' +
+        '<tr><th>Name</th><th>Email</th><th>Role</th><th>Change role</th></tr>' +
+
+        (data.users || []).map((user) => `
+          <tr>
+            <td>${esc(user.name)}</td>
+            <td>${esc(user.email)}</td>
+            <td>${esc(user.role)}</td>
+            <td>
+              <select data-user-role="${esc(user.id)}">
+                <option value="customer" ${user.role === 'customer' ? 'selected' : ''}>Customer</option>
+                <option value="seller" ${user.role === 'seller' ? 'selected' : ''}>Seller</option>
+                <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+              </select>
+
+              <button type="button" data-save-user="${esc(user.id)}">
+                Save
+              </button>
+            </td>
+          </tr>
+        `).join('') +
+      '</table>' ||
+      'No users found.';
+  }
+
+  // ==========================================
+  // CUSTOMER MESSAGES
+  // ==========================================
+
+  async function loadMessages() {
+    const data = await api('messages');
+
+    $('#adminMessages').innerHTML =
+      (data.messages || []).map((item) => `
+        <article class="message-item">
+          <b>${esc(item.name)} · ${esc(item.email)}</b>
+          <p>${esc(item.body)}</p>
+          <small>${esc(item.created_at)}</small>
+        </article>
+      `).join('') || 'No customer messages.';
+  }
+
+  // ==========================================
+  // LOAD ALL DASHBOARD SECTIONS
+  // ==========================================
+
+  async function load() {
+    const tasks = [
+      loadSection('aeConnectionStatus', 'AliExpress connection', loadAeConnection),
+      loadSection('aeSupplierOrders', 'AliExpress supplier approvals', loadAeSupplierOrders),
+      loadSection('adminStats', 'Analytics', loadAnalytics),
+      loadSection('adminOrders', 'Orders', loadOrders),
+      loadSection('sellerApplications', 'Seller applications', loadSellerApplications),
+      loadSection('adminProducts', 'Products', loadProducts),
+      loadSection('adminUsers', 'Users', loadUsers),
+      loadSection('adminMessages', 'Customer messages', loadMessages)
+    ];
+
     await Promise.allSettled(tasks);
   }
+
+  // ==========================================
+  // CREATE PRODUCT
+  // ==========================================
+
+  async function createProduct(event) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"], button:not([type])');
+
+    const formData = new FormData(form);
+
+    const product = {
+      name: formData.get('name'),
+      price: Number(formData.get('price')),
+      category: formData.get('category'),
+      image: formData.get('image'),
+      description: formData.get('description'),
+      stock: Number(formData.get('stock'))
+    };
+
+    try {
+      if (button) button.disabled = true;
+
+      await post('products', product);
+
+      message('Product created successfully.');
+      form.reset();
+
+      await loadSection('adminProducts', 'Products', loadProducts);
+      await loadSection('adminStats', 'Analytics', loadAnalytics);
+
+    } catch (error) {
+      message(error.message, true);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  // ==========================================
+  // ALIEXPRESS PRODUCT SEARCH
+  // ==========================================
+
+  async function searchAliExpress(event) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const output = $('#aeSearchResults');
+    const status = $('#aeSearchMessage');
+
+    output.innerHTML = '';
+    setMessage(status, 'Searching AliExpress…');
+
+    try {
+      const result = await post('aliexpress/search', {
+        keyWord: data.get('keyWord'),
+        currency: data.get('currency'),
+        countryCode: data.get('countryCode'),
+        local: data.get('local')
+      });
+
+      output.innerHTML = (result.products || []).map((product) => `
+        <article class="ae-result">
+          <img src="${esc(product.image)}" alt="">
+          <div>
+            <b>${esc(product.title)}</b>
+            <p>Product ID: ${esc(product.product_id)}</p>
+            <p>Price: ${esc(product.price)}</p>
+            <small>Orders: ${esc(product.orders)}</small>
+          </div>
+
+          <button
+            type="button"
+            data-ae-import="${esc(product.product_id)}"
+            data-ae-url="${esc(product.product_url || '')}">
+            Import product
+          </button>
+        </article>
+      `).join('') || 'No products found.';
+
+      setMessage(status, 'Search completed.');
+
+    } catch (error) {
+      setMessage(status, error.message, true);
+    }
+  }
+
+  // ==========================================
+  // EVENT DELEGATION
+  // ==========================================
+
+  async function handleClick(event) {
+    const button = event.target.closest('button');
+    if (!button) return;
+
+    try {
+      // Logout
+      if (
+        button.id === 'logoutNav' ||
+        button.id === 'logoutButton'
+      ) {
+        await logout();
+        return;
+      }
+
+      // Save order status
+      if (button.dataset.saveOrder) {
+        const id = button.dataset.saveOrder;
+        const select = document.querySelector(
+          `[data-order-status="${CSS.escape(id)}"]`
+        );
+
+        if (!select) return;
+
+        button.disabled = true;
+
+        await patch('orders/status', {
+          orderId: id,
+          status: select.value
+        });
+
+        message('Order status updated.');
+        await loadOrders();
+        return;
+      }
+
+      // Queue supplier review
+      if (button.dataset.aePrepare) {
+        if (!confirm('Queue this paid order for supplier review? No supplier order or payment will be submitted.')) {
+          return;
+        }
+
+        button.disabled = true;
+
+        await post('aliexpress/prepare-supplier-order', {
+          order_id: button.dataset.aePrepare
+        });
+
+        message('Order queued for admin supplier review. No supplier order was placed.');
+        await loadAeSupplierOrders();
+        return;
+      }
+
+      // Supplier order decisions
+      if (button.dataset.supplierDecision) {
+        const decision = button.dataset.decision;
+
+        const prompts = {
+          approve: 'Approve this supplier order for submission review? This will NOT place the order.',
+          reject: 'Reject this supplier order review?',
+          approve_payment: 'Separately approve supplier payment? This will NOT make a payment.'
+        };
+
+        if (!confirm(prompts[decision] || 'Continue?')) return;
+
+        button.disabled = true;
+
+        await post('aliexpress/supplier-order-decision', {
+          supplier_order_id: button.dataset.supplierDecision,
+          decision
+        });
+
+        message('Supplier review decision recorded. No supplier order or payment was submitted.');
+        await loadAeSupplierOrders();
+        return;
+      }
+
+      // Seller application decisions
+      if (button.dataset.application) {
+        const id = button.dataset.application;
+        const status = button.dataset.status;
+
+        if (!confirm(
+          status === 'approved'
+            ? 'Approve this seller application and change the applicant role to seller?'
+            : 'Reject this seller application?'
+        )) return;
+
+        button.disabled = true;
+
+        await patch('seller/applications', {
+          applicationId: id,
+          status
+        });
+
+        message('Seller application reviewed.');
+        await Promise.all([
+          loadSellerApplications(),
+          loadUsers()
+        ]);
+        return;
+      }
+
+      // Product status
+      if (button.dataset.productStatus) {
+        const productId = button.dataset.productStatus;
+        const status = button.dataset.status;
+
+        if (!confirm('Change this product status to ' + status + '?')) return;
+
+        button.disabled = true;
+
+        await patch('products/status', {
+          productId,
+          status
+        });
+
+        message('Product status updated.');
+        await loadProducts();
+        return;
+      }
+
+      // Stock adjustment
+      if (button.dataset.saveStock) {
+        const id = button.dataset.saveStock;
+
+        const action = document.querySelector(
+          `[data-stock-action="${CSS.escape(id)}"]`
+        );
+
+        const quantityInput = document.querySelector(
+          `[data-stock-quantity="${CSS.escape(id)}"]`
+        );
+
+        const quantity = Number(quantityInput?.value);
+
+        if (
+          !action ||
+          !Number.isSafeInteger(quantity) ||
+          quantity < 0
+        ) {
+          throw new Error('Enter a valid non-negative stock quantity.');
+        }
+
+        button.disabled = true;
+
+        await patch('products/stock', {
+          productId: id,
+          adjustment: action.value,
+          quantity
+        });
+
+        message('Product stock updated.');
+        await loadProducts();
+        return;
+      }
+
+      // Delete product
+      if (button.dataset.deleteProduct) {
+        if (!confirm('Permanently delete this product?')) return;
+
+        button.disabled = true;
+
+        await fetch('/api/products/' + encodeURIComponent(button.dataset.deleteProduct), {
+          method: 'DELETE',
+          credentials: 'same-origin'
+        }).then(async (response) => {
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Delete failed.');
+          return data;
+        });
+
+        message('Product deleted.');
+        await loadProducts();
+        return;
+      }
+
+      // Change user role
+      if (button.dataset.saveUser) {
+        const id = button.dataset.saveUser;
+
+        const select = document.querySelector(
+          `[data-user-role="${CSS.escape(id)}"]`
+        );
+
+        if (!select) return;
+
+        button.disabled = true;
+
+        await patch('users/role', {
+          userId: id,
+          role: select.value
+        });
+
+        message('User role updated.');
+        await loadUsers();
+        return;
+      }
+
+      // Import AliExpress product
+      if (button.dataset.aeImport) {
+        const sellingPrice = prompt('Enter the selling price in NGN:');
+
+        if (sellingPrice === null) return;
+
+        const price = Number(sellingPrice);
+
+        if (!Number.isSafeInteger(price) || price < 1) {
+          throw new Error('Enter a valid selling price.');
+        }
+
+        button.disabled = true;
+
+        await post('aliexpress/import', {
+          product_id: button.dataset.aeImport,
+          selling_price: price,
+          product_url: button.dataset.aeUrl || undefined
+        });
+
+        message('AliExpress product imported as pending. Admin approval is still required.');
+        await loadProducts();
+        return;
+      }
+
+    } catch (error) {
+      message(error.message || 'The operation failed.', true);
+      button.disabled = false;
+    }
+  }
+
+  // ==========================================
+  // START
+  // ==========================================
+
+  async function start() {
+    try {
+      const allowed = await requireAdmin();
+      if (!allowed) return;
+
+      const productForm = $('#productForm');
+      if (productForm) {
+        productForm.addEventListener('submit', createProduct);
+      }
+
+      const searchForm = $('#aeSearchForm');
+      if (searchForm) {
+        searchForm.addEventListener('submit', searchAliExpress);
+      }
+
+      document.addEventListener('click', handleClick);
+
+      await load();
+
+    } catch (error) {
+      console.error('Admin dashboard initialization failed:', error);
+      message(error.message || 'Unable to load the admin dashboard.', true);
+
+      if (error.message.includes('sign in')) {
+        location.replace('/login.html');
+      }
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', start);
+
+})();
