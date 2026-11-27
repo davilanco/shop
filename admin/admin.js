@@ -255,7 +255,7 @@
       (data.applications || []).map((application) => `
         <article class="message-item">
           <b>${esc(application.business_name)}</b>
-          <p>Applicant: ${esc(application.user_name)}</p>
+          <p>Applicant: ${esc(application.user_name || application.user_email)}</p>
           <p>Email: ${esc(application.user_email)}</p>
           <p>Details: ${esc(application.details)}</p>
           <p>Status: ${esc(application.status)}</p>
@@ -743,10 +743,65 @@
   }
 
   // ==========================================
+  // THEME + MENU (self-contained; no script.js)
+  // ==========================================
+
+  function initChrome() {
+    const root = document.documentElement;
+    root.dataset.theme = localStorage.getItem('davilanco_theme') || 'dark';
+
+    const themeToggle = $('#themeToggle');
+    if (themeToggle) {
+      themeToggle.addEventListener('click', () => {
+        const theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        root.dataset.theme = theme;
+        localStorage.setItem('davilanco_theme', theme);
+      });
+    }
+
+    const drawer = $('#navDrawer');
+    const backdrop = $('#drawerBackdrop');
+    const menuToggle = $('#menuToggle');
+    const menuClose = $('#menuClose');
+
+    const closeDrawer = () => {
+      if (drawer) {
+        drawer.classList.remove('open');
+        drawer.setAttribute('aria-hidden', 'true');
+      }
+      if (backdrop) backdrop.hidden = true;
+      if (menuToggle) menuToggle.setAttribute('aria-expanded', 'false');
+    };
+
+    const openDrawer = () => {
+      if (drawer) {
+        drawer.classList.add('open');
+        drawer.setAttribute('aria-hidden', 'false');
+      }
+      if (backdrop) backdrop.hidden = false;
+      if (menuToggle) menuToggle.setAttribute('aria-expanded', 'true');
+    };
+
+    if (menuToggle) menuToggle.addEventListener('click', openDrawer);
+    if (menuClose) menuClose.addEventListener('click', closeDrawer);
+    if (backdrop) backdrop.addEventListener('click', closeDrawer);
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeDrawer();
+    });
+
+    // Admin is already verified as admin — show admin nav link.
+    const navAdmin = $('#navAdmin');
+    if (navAdmin) navAdmin.hidden = false;
+  }
+
+  // ==========================================
   // START
   // ==========================================
 
   async function start() {
+    initChrome();
+
     try {
       const allowed = await requireAdmin();
       if (!allowed) return;
