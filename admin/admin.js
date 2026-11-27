@@ -790,8 +790,10 @@
       if (event.key === 'Escape') closeDrawer();
     });
 
-    // Admin is already verified as admin — show admin nav link.
+    // Admin page: always show seller + admin links.
+    const navSeller = $('#navSeller');
     const navAdmin = $('#navAdmin');
+    if (navSeller) navSeller.hidden = false;
     if (navAdmin) navAdmin.hidden = false;
   }
 
