@@ -1,142 +1,151 @@
-import { json, sha256Hex } from '../../lib/tokens.js';
+import { json, requireUser, body } from '../../lib/auth.js';
+import { fail, uid } from '../../lib/api/common.js';
 
-export async function onRequest(context) {
-  const { request, env } = context;
-
-  if (request.method !== 'POST') {
-    return json({ error: 'Method not allowed' }, 405);
-  }
-
-  // ---------- 1. Check login ----------
-  const session = await getSession(request, env);
-  if (!session?.userId) {
-    return json({ error: 'unauthorized' }, 401);
-  }
-
-  // ---------- 2. Check email verified ----------
-  const user = await env.DB.prepare(
-    'SELECT id, email, email_verified_at FROM users WHERE id = ?'
-  ).bind(session.userId).first();
-
-  if (!user) {
-    return json({ error: 'user_not_found' }, 404);
-  }
-
-  if (!user.email_verified_at) {
-    return json({ error: 'email_not_verified' }, 403);
-  }
-
-  // ---------- 3. Get cart from frontend ----------
-  const body = await request.json().catch(() => ({}));
-  const customer = body.customer || {};
-  const items = body.items || [];
-
-  if (!items.length) {
-    return json({ error: 'cart_empty' }, 400);
-  }
-
-  const email = customer.email || user.email;
-  if (!email) {
-    return json({ error: 'email_required' }, 400);
-  }
-
-  // ---------- 4. Calculate total from DB - NEVER trust frontend price ----------
-  let total = 0;
-  const orderItems = [];
-
-  for (const item of items) {
-    const product = await env.DB.prepare(
-      'SELECT id, name, price FROM products WHERE id = ?'
-    ).bind(item.productId).first();
-
-    if (!product) {
-      return json({ error: `Product not found: ${item.productId}` }, 400);
+export async function onRequest({ request, env }) {
+  try {
+    if (request.method !== 'POST') {
+      return json({ error: 'Method not allowed.' }, 405);
     }
 
-    const qty = Math.min(99, Math.max(1, Number(item.quantity) || 1));
-    total += product.price * qty;
+    const user = await requireUser(request, env);
 
-    orderItems.push({
-      productId: product.id,
-      name: product.name,
-      price: product.price,
-      quantity: qty,
-    });
-  }
+    if (!env.PAYSTACK_SECRET_KEY) {
+      return json({ error: 'Payments are not configured.' }, 503);
+    }
 
-  // Paystack uses kobo
-  const amountKobo = Math.round(total * 100);
+    const data = await body(request);
+    const items = Array.isArray(data.items) ? data.items : [];
 
-  // ---------- 5. Create order as pending ----------
-  const reference = `DAV-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    if (!items.length || items.length > 30) {
+      return json({ error: 'Your bag is empty or too large.' }, 400);
+    }
 
-  const orderResult = await env.DB.prepare(
-    `INSERT INTO orders (user_id, reference, email, total, status, items, created_at)
-     VALUES (?, ?, ?, ?, 'pending', ?, ?)`
-  ).bind(
-    user.id,
-    reference,
-    email,
-    total,
-    JSON.stringify(orderItems),
-    new Date().toISOString()
-  ).run();
+    let total = 0;
+    const lines = [];
 
-  const orderId = orderResult.meta?.last_row_id;
+    for (const item of items) {
+      const product = await env.DB.prepare(`
+        SELECT id, name, price, stock
+        FROM products
+        WHERE id = ? AND status = 'active'
+      `).bind(item.productId).first();
 
-  // ---------- 6. Call Paystack ----------
-  const origin = new URL(request.url).origin;
+      const quantity = Math.max(
+        1,
+        Math.min(20, Math.floor(Number(item.quantity) || 1))
+      );
 
-  const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      email,
-      amount: amountKobo,
+      if (!product || product.stock < quantity) {
+        return json({
+          error: 'Product unavailable or insufficient stock.'
+        }, 409);
+      }
+
+      total += product.price * quantity;
+      lines.push({ ...product, qty: quantity });
+    }
+
+    const customer = data.customer || {};
+
+    if (
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(customer.email || '')) ||
+      !customer.name ||
+      !customer.phone ||
+      !customer.address
+    ) {
+      return json({ error: 'Complete delivery details.' }, 400);
+    }
+
+    const reference = 'DVL-' + crypto.randomUUID();
+    const orderId = uid();
+
+    await env.DB.prepare(`
+      INSERT INTO orders(
+        id, user_id, order_number, total, status,
+        payment_status, payment_reference, customer_name,
+        customer_email, customer_phone, delivery_address,
+        delivery_city, delivery_state, note
+      )
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).bind(
+      orderId,
+      user.id,
       reference,
-      callback_url: `${origin}/payment-success.html`,
-      metadata: {
+      total,
+      'pending',
+      'pending',
+      reference,
+      String(customer.name).slice(0, 100),
+      String(customer.email).slice(0, 200),
+      String(customer.phone).slice(0, 40),
+      String(customer.address).slice(0, 500),
+      String(customer.city || '').slice(0, 100),
+      String(customer.state || '').slice(0, 100),
+      String(customer.note || '').slice(0, 500)
+    ).run();
+
+    for (const item of lines) {
+      await env.DB.prepare(`
+        INSERT INTO order_items(
+          id, order_id, product_id, product_name,
+          unit_price, quantity
+        )
+        VALUES(?,?,?,?,?,?)
+      `).bind(
+        uid(),
         orderId,
-        userId: user.id,
-        customer,
-        items: orderItems,
-      },
-    }),
-  });
+        item.id,
+        item.name,
+        item.price,
+        item.qty
+      ).run();
+    }
 
-  const paystackData = await paystackRes.json();
+    const origin = new URL(request.url).origin;
 
-  if (!paystackData.status) {
-    return json({ error: paystackData.message || 'Paystack failed' }, 400);
+    const response = await fetch(
+      'https://api.paystack.co/transaction/initialize',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + env.PAYSTACK_SECRET_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: customer.email,
+          amount: Math.round(total * 100),
+          reference,
+          callback_url: new URL(
+            '/payment-success.html',
+            origin
+          ).href,
+          metadata: {
+            order_id: orderId
+          }
+        })
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok || !result.status) {
+      await env.DB.prepare(`
+        UPDATE orders
+        SET payment_status = 'failed'
+        WHERE id = ?
+      `).bind(orderId).run();
+
+      return json({
+        error: 'Could not initialize payment.'
+      }, 502);
+    }
+
+    return json({
+      authorization_url: result.data.authorization_url,
+      reference
+    });
+
+  } catch (error) {
+    return fail(error);
   }
-
-  // ---------- 7. Return to frontend ----------
-  return json({
-    authorization_url: paystackData.data.authorization_url,
-    reference: paystackData.data.reference,
-    orderId,
-  });
-}
-
-// ---------- Helpers ----------
-
-async function getSession(request, env) {
-  // Try cookie first
-  const cookie = request.headers.get('Cookie') || '';
-  const match = cookie.match(/davilanco_session=([^;]+)/);
-  const token = match?.[1];
-
-  if (!token) return null;
-
-  // If your sessions table stores sha256 of token
-  const tokenHash = await sha256Hex(token);
-
-  const session = await env.DB.prepare(
-    'SELECT user_id AS userId FROM sessions WHERE token_hash = ? AND expires_at > ?'
-  ).bind(tokenHash, new Date().toISOString()).first();
-
-  return session;
 }
