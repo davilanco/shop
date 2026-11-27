@@ -1,171 +1,151 @@
-import { json, requireUser, body } from '../../lib/auth.js';
-import { fail, uid } from '../../lib/api/common.js';
+import { json } from '../../lib/auth.js';
 
-export async function onRequest({ request, env }) {
+async function verifySignature(rawBody, signature, secret) {
+  if (!signature || !secret) return false;
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    {
+      name: 'HMAC',
+      hash: 'SHA-512'
+    },
+    false,
+    ['sign']
+  );
+
+  const digest = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(rawBody)
+  );
+
+  const expected = [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+
+  if (signature.length !== expected.length) return false;
+
+  let difference = 0;
+
+  for (let i = 0; i < expected.length; i++) {
+    difference |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  }
+
+  return difference === 0;
+}
+
+export async function onRequestPost({ request, env }) {
   try {
-    if (request.method !== 'POST') {
-      return json({ error: 'Method not allowed.' }, 405);
-    }
-
-    const sessionUser = await requireUser(request, env);
-
-    // Check the actual database verification status.
-    const user = await env.DB.prepare(`
-      SELECT id, email, email_verified_at
-      FROM users
-      WHERE id = ?
-    `).bind(sessionUser.id).first();
-
-    if (!user) {
-      return json({ error: 'User account not found.' }, 404);
-    }
-
-    // Do not allow payment initialization before email verification.
-    if (!user.email_verified_at) {
-      return json({
-        error: 'Verify your email address before making payment.',
-        code: 'EMAIL_NOT_VERIFIED',
-        redirect: '/verify-email.html'
-      }, 403);
-    }
-
     if (!env.PAYSTACK_SECRET_KEY) {
-      return json({ error: 'Payments are not configured.' }, 503);
+      return json({ error: 'Payment configuration missing.' }, 503);
     }
 
-    const data = await body(request);
-    const items = Array.isArray(data.items) ? data.items : [];
+    const rawBody = await request.text();
 
-    if (!items.length || items.length > 30) {
-      return json({ error: 'Your bag is empty or too large.' }, 400);
+    const signature = request.headers.get('x-paystack-signature');
+
+    const validSignature = await verifySignature(
+      rawBody,
+      signature,
+      env.PAYSTACK_SECRET_KEY
+    );
+
+    if (!validSignature) {
+      return json({ error: 'Invalid signature.' }, 401);
     }
 
-    let total = 0;
-    const lines = [];
+    let event;
 
-    for (const item of items) {
-      const product = await env.DB.prepare(`
-        SELECT id, name, price, stock
-        FROM products
-        WHERE id = ? AND status = 'active'
-      `).bind(item.productId).first();
-
-      const quantity = Math.max(
-        1,
-        Math.min(20, Math.floor(Number(item.quantity) || 1))
-      );
-
-      if (!product || product.stock < quantity) {
-        return json({
-          error: 'Product unavailable or insufficient stock.'
-        }, 409);
-      }
-
-      total += product.price * quantity;
-      lines.push({ ...product, qty: quantity });
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return json({ error: 'Invalid event body.' }, 400);
     }
 
-    const customer = data.customer || {};
-
-    if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(customer.email || '')) ||
-      !customer.name ||
-      !customer.phone ||
-      !customer.address
-    ) {
-      return json({ error: 'Complete delivery details.' }, 400);
+    // We only process successful charges.
+    if (event.event !== 'charge.success') {
+      return json({ received: true });
     }
 
-    const reference = 'DVL-' + crypto.randomUUID();
-    const orderId = uid();
+    const reference = String(event.data?.reference || '');
 
-    await env.DB.prepare(`
-      INSERT INTO orders(
-        id, user_id, order_number, total, status,
-        payment_status, payment_reference, customer_name,
-        customer_email, customer_phone, delivery_address,
-        delivery_city, delivery_state, note
-      )
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).bind(
-      orderId,
-      user.id,
-      reference,
-      total,
-      'pending',
-      'pending',
-      reference,
-      String(customer.name).slice(0, 100),
-      String(customer.email).slice(0, 200),
-      String(customer.phone).slice(0, 40),
-      String(customer.address).slice(0, 500),
-      String(customer.city || '').slice(0, 100),
-      String(customer.state || '').slice(0, 100),
-      String(customer.note || '').slice(0, 500)
-    ).run();
-
-    for (const item of lines) {
-      await env.DB.prepare(`
-        INSERT INTO order_items(
-          id, order_id, product_id, product_name,
-          unit_price, quantity
-        )
-        VALUES(?,?,?,?,?,?)
-      `).bind(
-        uid(),
-        orderId,
-        item.id,
-        item.name,
-        item.price,
-        item.qty
-      ).run();
+    if (!reference) {
+      return json({ error: 'Missing payment reference.' }, 400);
     }
 
-    const origin = new URL(request.url).origin;
+    // Find the matching local order.
+    const order = await env.DB.prepare(`
+      SELECT id, total, payment_status
+      FROM orders
+      WHERE payment_reference = ?
+    `).bind(reference).first();
 
+    if (!order) {
+      return json({ error: 'Order not found.' }, 404);
+    }
+
+    // Verify directly with Paystack before changing the database.
     const response = await fetch(
-      'https://api.paystack.co/transaction/initialize',
+      'https://api.paystack.co/transaction/verify/' +
+      encodeURIComponent(reference),
       {
-        method: 'POST',
         headers: {
-          Authorization: 'Bearer ' + env.PAYSTACK_SECRET_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          email: user.email,
-          amount: Math.round(total * 100),
-          reference,
-          callback_url: new URL(
-            '/payment-success.html',
-            origin
-          ).href,
-          metadata: {
-            order_id: orderId
-          }
-        })
+          Authorization: 'Bearer ' + env.PAYSTACK_SECRET_KEY
+        }
       }
     );
 
     const result = await response.json();
 
-    if (!response.ok || !result.status) {
-      await env.DB.prepare(`
-        UPDATE orders
-        SET payment_status = 'failed'
-        WHERE id = ?
-      `).bind(orderId).run();
-
-      return json({
-        error: 'Could not initialize payment.'
-      }, 502);
+    if (
+      !response.ok ||
+      !result.status ||
+      result.data.status !== 'success' ||
+      result.data.reference !== reference ||
+      result.data.amount !== Math.round(order.total * 100)
+    ) {
+      return json({ error: 'Payment verification failed.' }, 402);
     }
 
+    // A unique key prevents duplicate webhook processing.
+    const idempotencyKey = 'paystack:' + reference;
+
+    const inserted = await env.DB.prepare(`
+      INSERT OR IGNORE INTO processed_webhooks(
+        idempotency_key,
+        event_type
+      )
+      VALUES(?, 'charge.success')
+    `).bind(idempotencyKey).run();
+
+    if (!inserted.meta?.changes) {
+      return json({
+        received: true,
+        duplicate: true
+      });
+    }
+
+    // Update the local order.
+    await env.DB.prepare(`
+      UPDATE orders
+      SET payment_status = 'paid',
+          status = 'approved',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(order.id).run();
+
     return json({
-      authorization_url: result.data.authorization_url,
-      reference
+      received: true,
+      updated: true,
+      payment_status: 'paid'
     });
 
   } catch (error) {
-    return fail(error);
+    console.error('Paystack webhook error:', error);
+
+    return json({
+      error: 'Webhook processing failed.'
+    }, 500);
   }
 }
